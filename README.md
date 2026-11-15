@@ -6,6 +6,34 @@
 
 현재 **0.6.0**으로 로컬/서버 페이징·무한 스크롤, 서버 편집·추가·삭제·저장과 Excel 범위 다운로드를 제공합니다. A1 수식·그룹/트리·공개 API 일부 이행 계층도 포함합니다. RealGrid 공식 기능을 참고해 자체 구현하며 원본 코드·리소스를 포함하지 않습니다. RealGrid 전체 기능·API와의 호환성을 보장하지 않습니다. npm에는 아직 등록하지 않았습니다.
 
+## 다른 프로젝트에서 시작하기
+
+`packages/grid/dist/moa-grid.js`와 `moa-grid.css`를 복사하고 비어 있는 요소에 생성합니다.
+
+```html
+<link rel="stylesheet" href="./moa-grid.css">
+<div id="grid"></div>
+<script src="./moa-grid.js"></script>
+<script>
+  const grid = new MoaGrid('#grid', {
+    columns: [
+      { field: 'name', header: '품목' },
+      { field: 'qty', header: '수량', type: 'number' }
+    ],
+    data: [{ name: '노트', qty: 10 }]
+  });
+</script>
+```
+
+| 사용할 환경 | 안내 |
+| --- | --- |
+| HTML·JSP / 파일 복사 | [빠른 시작](docs/getting-started.md) · [최소 실행 예제](examples/quick-start/index.html) |
+| React·Vue / 로컬 tgz 설치 | [프레임워크 연결](docs/frameworks.md) · [React 컴포넌트](examples/react/ProductGrid.jsx) · [Vue 컴포넌트](examples/vue/ProductGrid.vue) |
+| 서버 API·페이지·변경 저장 | [조회 계약](docs/server-data.md) · [저장 계약](docs/server-editing.md) |
+| 전체 옵션과 목적별 예제 | [API](packages/grid/README.md) · [예제 목록](examples/README.md) |
+
+다운로드한 배포 파일은 빌드 없이 사용합니다. LICENSE도 함께 배포하세요. Excel 셀 복사·붙여넣기에는 별도 모듈이 필요 없으며 `.xlsx` 파일 기능만 로컬 SheetJS를 선택적으로 추가합니다. 공개 npm 등록 전이므로 설치형 프로젝트에는 `npm pack ./packages/grid`로 만든 tgz를 사용합니다.
+
 ## 0.6.0에 추가한 기능
 
 - `dataSource.save` 연결 시 서버 셀 편집·Excel 붙여넣기·행 추가/삭제와 저장 전 Ctrl+Z/Y
@@ -73,7 +101,7 @@
     ],
     data: [{ code: 'A001', name: '품목', quantity: 10 }],
     onChange: ({ reason, changes, data }) => {
-      // 호스트 애플리케이션에서 저장합니다. 그리드는 서버 통신을 하지 않습니다.
+      // 로컬 모드의 변경 알림입니다. 필요한 저장 처리는 호스트에서 연결합니다.
       console.log(reason, changes);
     }
   });
@@ -97,7 +125,7 @@
 
 macOS는 Ctrl 대신 ⌘를 사용합니다. 셀 안에서 텍스트를 편집 중이면 복사·붙여넣기·실행 취소는 기본 입력창 동작을 유지합니다. 읽기 전용 컬럼은 보호하며, 잘못된 값·범위 초과가 있으면 붙여넣기 전체를 적용하지 않습니다. 자세한 정책은 [셀 조작 계약](docs/grid-interaction-contract.md)에 있습니다.
 
-일반 모드에서는 행만 부족한 경우 자동으로 추가합니다. 그룹·트리·검색·조건 필터 상태의 행 범위 초과는 거부합니다. XLSX 가져오기는 헤더로 매핑한 데이터 전체 교체이며 Ctrl+Z/Y로 복원할 수 있습니다. 한글 composition 파이프라인은 검사했으며, 네이티브 IME·스크린리더·다른 브라우저 엔진은 추가 수용시험이 필요합니다.
+일반 모드에서는 행만 부족한 경우 자동으로 추가합니다. 그룹·트리·검색·조건 필터 상태의 행 범위 초과는 거부합니다. XLSX 가져오기는 헤더로 매핑한 데이터 전체 교체이며 Ctrl+Z/Y로 복원할 수 있습니다. 한글 composition 파이프라인과 Chromium·Firefox·WebKit의 핵심 조작을 검사했으며, 네이티브 IME·실제 스크린리더 수용시험은 남아 있습니다.
 
 ## 구현 대상과 개발 순서
 
@@ -122,6 +150,6 @@ npm run catalog -- --check
 
 ## 현재 한계
 
-변경은 메모리에 유지되며 서버·파일에 자동 저장하지 않습니다. 서버 변경 저장·행 변경 상태·자동 같은 값 병합·피벗·전체 Excel 수식은 후속 구현 대상입니다. 그룹과 트리는 별도 모드이며 수동 병합은 가상 스크롤이 꺼진 일반 모드에서 사용합니다. 대용량 처리 성능과 전체 브라우저·한글 IME·스크린리더 호환성은 아직 인증하지 않았습니다.
+로컬 변경은 메모리에 유지되며 자동 저장하지 않습니다. 서버 변경 저장은 `dataSource.save`와 호스트의 원자적 저장·버전·중복 방지 계약이 필요합니다. 예제 서버의 JSON 저장은 운영 DB/인증을 대체하지 않습니다. 자동 같은 값 병합·피벗·전체 Excel 수식은 후속 구현 대상입니다. 그룹과 트리는 별도 모드이며 수동 병합은 가상 스크롤이 꺼진 일반 모드에서 사용합니다. 전체 브라우저·네이티브 한글 IME·실제 스크린리더 호환성을 인증한 단계는 아닙니다.
 
 RealGrid는 기능 참고 대상의 제품명이며 이 프로젝트는 해당 제품과 제휴하지 않습니다. [MIT License](LICENSE)는 이 저장소의 자체 작성물에 적용됩니다.

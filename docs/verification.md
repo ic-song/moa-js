@@ -1,3 +1,18 @@
+# 사용법·예제 검증 (0.6.0, 2026-11-16)
+
+[빠른 시작](getting-started.md)·[React/Vue 연결](frameworks.md)과 복사용 최소 예제를 추가했습니다. 코어/배포 코드와 런타임 의존성 변경은 없습니다.
+
+- `npm run check`: 기존 Node 53개, 빌드, 카탈로그 통과. 문서 상대 링크와 Git whitespace 검사 통과.
+- 저장소를 참조하지 않는 별도 consumer 디렉터리에 tgz를 **오프라인 설치**하고 CommonJS 해석·포함된 배포물/vendor/라이선스 해시 확인.
+- 가이드의 첫 HTML 코드 블록을 그대로 별도 프로젝트로 복사해 JS/CSS/LICENSE만으로 실행. Chromium/Firefox/WebKit에서 표시 확인.
+- file:// 최소 예제의 편집·Ctrl+Z/Y·데이터 읽기/교체, 320/390/768/1440px 문서 넘침 없음과 HTTP 요청/페이지 JS 예외 0 확인.
+- HTTP로 패키지의 브라우저 ESM 파일을 import해 실제 그리드 생성.
+- React/React DOM 19.2.3 StrictMode, Vue/compiler-sfc 3.5.45 예제를 esbuild 0.25.12로 실제 컴파일해 Chromium에서 생성·편집·최신 콜백·재렌더 시 Undo 유지·rows 교체 시 이력 초기화·해제/재생성 확인.
+
+통합 검사 10개 체크포인트가 통과했습니다. 개발 도구는 무시되는 output 아래에만 설치했습니다. 재현 절차는 [프레임워크 안내](frameworks.md)의 ‘예제 개발 검증’에 있으며 결과는 `output/playwright/usage/results.json`입니다. 최소 예제/React 대표 화면을 직접 검토했습니다. JSP 서버, Next/Nuxt 전체 앱, 실제 스크린리더/IME 및 모든 화면의 시각 수용시험을 완료했다는 뜻은 아닙니다.
+
+---
+
 # 0.6.0 검증
 
 기준일: 2026-11-16. [서버 편집·저장 계약](server-editing.md)과 실행 가능한 파일 저장 HTTP 예제를 추가했습니다. 운영 DB/API·사용자 인증 연결은 포함하지 않습니다.

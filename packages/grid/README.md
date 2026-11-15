@@ -1,6 +1,8 @@
-# @moa-js/grid 0.3.0
+# @moa-js/grid 0.6.0
 
 폐쇄망용 데이터 그리드입니다. 코어는 외부 런타임 의존성이 없으며, XLSX 파일 기능만 동봉한 SheetJS Community Edition 0.20.3을 선택적으로 사용합니다. npm에는 아직 등록하지 않았습니다.
+
+처음 사용한다면 [HTML·JSP·로컬 npm 빠른 시작](https://github.com/ic-song/moa-js/blob/main/docs/getting-started.md), [React·Vue 연결](https://github.com/ic-song/moa-js/blob/main/docs/frameworks.md), [목적별 예제](https://github.com/ic-song/moa-js/blob/main/examples/README.md)를 먼저 확인하세요. 파일 복사는 JS/CSS와 LICENSE, 설치형 프로젝트는 저장소에서 `npm pack ./packages/grid`로 만든 tgz를 사용합니다. 아래는 API 참조입니다.
 
 ## 배포
 
@@ -49,6 +51,8 @@
 | `tree` | `{idField, parentField, labelField}`. ID·부모 ID 평면 배열 기반 |
 | `xlsx` | 선택 XLSX 라이브러리 객체. 기본값 `globalThis.XLSX` |
 | `label` | 그리드 접근성 이름 |
+| `dataMode`, `pageSize` | virtual/infinite/pagination, 구간 행 수. 로컬 기본 virtual, 서버 기본 pagination |
+| `dataSource` | 선택 서버 load/save/exportRows 콜백, rowKey/versionField/timeoutMs. data와 동시 사용 불가 |
 | `onChange` | `{reason, changes, data}`. 데이터 변경 후 호출 |
 | `onSelectionChange` | 0 기준 표시 좌표 `{top,bottom,left,right}` |
 | `onColumnResize` | `{field,width}`. 너비 변경 시 호출 |
@@ -60,6 +64,7 @@
 | API | 동작 |
 | --- | --- |
 | `getData({raw=false})` | 로컬 전체/서버 읽어온 행의 얕은 복사. 수식 모드는 기본 계산값, raw:true는 원문 |
+| `finishEdit()` | 현재 입력창 값을 검증·확정. 실패/조합 중이면 false이며 입력창 유지. getData 전에 사용 가능 |
 | `setData(rows)` | 데이터 교체·이력·선택 초기화. 현재 필터·정렬·모드는 유지하며 트리 관계를 검증 |
 | `setSearch(text)` | 전체 열 문자열 검색; 진행 중 편집은 취소 |
 | `getSelection()` | 표시 좌표의 선택 범위. 병합과 겹치면 병합 범위까지 확장 |
@@ -118,20 +123,20 @@ grid.downloadCSV();
 
 XLSX 기본 내보내기는 현재 표시 행만 포함합니다. 접힌 그룹·트리의 자손도 모두 포함하려면 `scope:'all'`을 사용합니다. `view`에는 현재 수동 병합을 포함하며 `all`은 병합 없이 원본 데이터를 출력합니다. 수식 보존은 `formulas:true`와 `scope:all`로 별도 요청합니다. 복잡한 스타일·이미지·시트 보호는 후속 대상입니다. XLSX는 20MB, 시트 영역 100만 셀까지 입력을 제한하고 클립보드는 10만 셀까지 처리합니다. 이 수치는 성능 보장이 아닙니다.
 
-`GridModel`은 DOM 없이 `apply`, `replaceRows`, `insertRows`, `removeRows`, `undo`, `redo`를 사용할 수 있습니다. 구조 변경 이력은 행 스냅샷을 보관하므로 큰 데이터와 많은 이력에서는 메모리를 고려하세요. 자세한 지원 차이는 저장소의 [RealGrid 비교](../../docs/realgrid-comparison.md)와 [검증 기록](../../docs/verification.md)을 확인하세요.
+`GridModel`은 DOM 없이 `apply`, `replaceRows`, `insertRows`, `removeRows`, `undo`, `redo`를 사용할 수 있습니다. 구조 변경 이력은 행 스냅샷을 보관하므로 큰 데이터와 많은 이력에서는 메모리를 고려하세요. 자세한 지원 차이는 저장소의 [RealGrid 비교](https://github.com/ic-song/moa-js/blob/main/docs/realgrid-comparison.md)와 [검증 기록](https://github.com/ic-song/moa-js/blob/main/docs/verification.md)을 확인하세요.
 
 ## 0.3 확장
 
-행·열 가상 스크롤과 A1 수식 설정·제약은 [확장 API](../../docs/grid-advanced.md), 선택적인 `MoaRealGrid` 배포물은 [공개 API 일부 이행](../../docs/realgrid-api-subset.md)에 정리했습니다. 수식은 기본 비활성화이며 전체 Excel 계산 엔진이나 전체 RealGrid 교체 호환을 제공하지 않습니다.
+행·열 가상 스크롤과 A1 수식 설정·제약은 [확장 API](https://github.com/ic-song/moa-js/blob/main/docs/grid-advanced.md), 선택적인 `MoaRealGrid` 배포물은 [공개 API 일부 이행](https://github.com/ic-song/moa-js/blob/main/docs/realgrid-api-subset.md)에 정리했습니다. 수식은 기본 비활성화이며 전체 Excel 계산 엔진이나 전체 RealGrid 교체 호환을 제공하지 않습니다.
 
 ## 0.4 표시 방식과 다운로드
 
-`dataMode: "virtual" | "infinite" | "pagination"`, `pageSize`와 `setDataMode`, `setPage`, `setPageSize`, `loadMore`, `getPagingState`를 제공합니다. 엑셀 다운로드 scope는 view/filtered/all/selection입니다. [사용 예제·범위·제약](../../docs/data-modes.md)을 확인하세요.
+`dataMode: "virtual" | "infinite" | "pagination"`, `pageSize`와 `setDataMode`, `setPage`, `setPageSize`, `loadMore`, `getPagingState`를 제공합니다. 엑셀 다운로드 scope는 view/filtered/all/selection입니다. [사용 예제·범위·제약](https://github.com/ic-song/moa-js/blob/main/docs/data-modes.md)을 확인하세요.
 
 ## 0.5 서버 데이터
 
-`dataSource: {load,rowKey,timeoutMs,exportRows}`로 서버 pagination/infinite를 연결합니다. `await grid.ready`, `reload()`, `retryLoad()`를 제공하고 페이지/추가 요청은 Promise<boolean>을 반환합니다. 서버 검색·정렬·필터와 실패/취소/재시도를 지원하며 save가 없는 서버 데이터는 조회 전용입니다. [실행 예제·요청/응답·전체 Excel·제약](../../docs/server-data.md)을 확인하세요.
+`dataSource: {load,rowKey,timeoutMs,exportRows}`로 서버 pagination/infinite를 연결합니다. `await grid.ready`, `reload()`, `retryLoad()`를 제공하고 페이지/추가 요청은 Promise<boolean>을 반환합니다. 서버 검색·정렬·필터와 실패/취소/재시도를 지원하며 save가 없는 서버 데이터는 조회 전용입니다. [실행 예제·요청/응답·전체 Excel·제약](https://github.com/ic-song/moa-js/blob/main/docs/server-data.md)을 확인하세요.
 
 ## 0.6 서버 편집·저장
 
-`dataSource.save`와 양의 정수 행 버전(`versionField`, 기본 `_version`)을 연결하면 서버 셀 편집·붙여넣기·행 추가/삭제와 Ctrl+Z/Y를 사용할 수 있습니다. `getChanges()`는 추가/수정/삭제 묶음, `getSaveState()`는 저장 상태를 반환합니다. `await saveChanges()`는 저장 확인, `await discardChanges()`는 초안 취소 후 재조회입니다. 미저장 변경의 조회 이동을 차단하고, 응답 불명 시 같은 요청 ID로 재확인합니다. 서버는 원자적 트랜잭션·버전 충돌 검사·영속적 요청 ID 중복 방지를 보장해야 합니다. [전체 계약·실행 예제](../../docs/server-editing.md)를 확인하세요.
+`dataSource.save`와 양의 정수 행 버전(`versionField`, 기본 `_version`)을 연결하면 서버 셀 편집·붙여넣기·행 추가/삭제와 Ctrl+Z/Y를 사용할 수 있습니다. `getChanges()`는 추가/수정/삭제 묶음, `getSaveState()`는 저장 상태를 반환합니다. `await saveChanges()`는 저장 확인, `await discardChanges()`는 초안 취소 후 재조회입니다. 미저장 변경의 조회 이동을 차단하고, 응답 불명 시 같은 요청 ID로 재확인합니다. 서버는 원자적 트랜잭션·버전 충돌 검사·영속적 요청 ID 중복 방지를 보장해야 합니다. [전체 계약·실행 예제](https://github.com/ic-song/moa-js/blob/main/docs/server-editing.md)를 확인하세요.
