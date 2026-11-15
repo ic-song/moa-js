@@ -75,13 +75,14 @@ export class RemoteChanges {
     const rows = this.model.rows.map(row => created.get(row[draftField]) || updated.get(String(row[keyField])) || row);
     this.validateVersions(this.remote.validateRows(rows)); return rows;
   }
-  save(onChange) {
+  save(onChange, beforeSend = () => {}) {
     if (this.status === 'saving') return this.promise;
     if (!this.dirty || this.status === 'refresh') return Promise.resolve(null);
     let batch;
     try { batch = this.prepare(); } catch (error) { this.status = 'error'; this.error = error.message; onChange(); return Promise.resolve(null); }
     this.controller = new AbortController(); this.status = 'saving'; this.error = null;
-    this.promise = withRequestTimeout(() => this.remote.source.save({ ...copy(batch), signal: this.controller.signal }), this.controller, this.remote.timeoutMs)
+    const controller = this.controller;
+    this.promise = withRequestTimeout(async () => { await beforeSend(); if (controller.signal.aborted) throw controller.signal.reason; return this.remote.source.save({ ...copy(batch), signal: controller.signal }); }, controller, this.remote.timeoutMs)
       .then(result => { const rows = this.receipt(result, batch); this.status = 'refresh'; return rows; })
       .catch(error => { this.status = error?.committed === false ? 'error' : 'uncertain'; this.error = error?.message || String(error); return null; })
       .finally(onChange);

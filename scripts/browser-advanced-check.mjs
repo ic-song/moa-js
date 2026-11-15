@@ -3,15 +3,16 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import path from 'node:path';
+const DEMO_URL = process.env.MOA_DEMO_URL || 'http://127.0.0.1:4173';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, 'output/playwright/advanced'); await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:4173' });
+await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: `${DEMO_URL}` });
 const page = await context.newPage(), errors = [], remoteRequests = [], checks = [];
 page.on('pageerror', error => errors.push(error.message));
-page.on('request', request => { if (/^https?:/.test(request.url()) && !request.url().startsWith('http://127.0.0.1:4173/')) remoteRequests.push(request.url()); });
+page.on('request', request => { if (/^https?:/.test(request.url()) && !request.url().startsWith(`${DEMO_URL}/`)) remoteRequests.push(request.url()); });
 const cell = (row, col) => page.locator(`td[data-row="${row}"][data-col="${col}"]`);
 const data = () => page.evaluate(() => grid.getData());
 const record = name => { checks.push(name); console.log('PASS', name); };
@@ -21,7 +22,7 @@ const clipboard = async (text, html) => page.evaluate(async ({ text, html }) => 
   else await navigator.clipboard.writeText(text);
 }, { text, html });
 try {
-  await page.goto('http://127.0.0.1:4173/examples/grid/index.html'); const baseline = await data();
+  await page.goto(`${DEMO_URL}/examples/grid/index.html`); const baseline = await data();
   await clipboard('엑셀 물품\t분류\t1,234\t12,500.50\t총무\t"첫줄\n둘째줄"', '<table><tr><td>엑셀 물품</td><td>분류</td><td x:num="1234">1,234</td><td x:num="12500.5">12,500.50</td><td>총무</td><td>첫줄<br>둘째줄</td></tr></table>');
   await cell(0, 1).click(); await page.keyboard.press('Control+v');
   let rows = await data(); assert.equal(rows[0].quantity, 1234); assert.equal(rows[0].price, 12500.5); assert.equal(rows[0].note, '첫줄\n둘째줄');

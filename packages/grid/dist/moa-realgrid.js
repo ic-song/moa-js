@@ -1,4 +1,4 @@
-/*! Moa JS Grid v0.6.0 | MIT License | See LICENSE */
+/*! Moa JS Grid v0.7.0 | MIT License | See LICENSE */
 (function () {
 'use strict';
 // A bounded expression parser. No JavaScript evaluation or property access.
@@ -750,19 +750,129 @@ class RemoteChanges {
     const rows = this.model.rows.map(row => created.get(row[draftField]) || updated.get(String(row[keyField])) || row);
     this.validateVersions(this.remote.validateRows(rows)); return rows;
   }
-  save(onChange) {
+  save(onChange, beforeSend = () => {}) {
     if (this.status === 'saving') return this.promise;
     if (!this.dirty || this.status === 'refresh') return Promise.resolve(null);
     let batch;
     try { batch = this.prepare(); } catch (error) { this.status = 'error'; this.error = error.message; onChange(); return Promise.resolve(null); }
     this.controller = new AbortController(); this.status = 'saving'; this.error = null;
-    this.promise = withRequestTimeout(() => this.remote.source.save({ ...copy(batch), signal: this.controller.signal }), this.controller, this.remote.timeoutMs)
+    const controller = this.controller;
+    this.promise = withRequestTimeout(async () => { await beforeSend(); if (controller.signal.aborted) throw controller.signal.reason; return this.remote.source.save({ ...copy(batch), signal: controller.signal }); }, controller, this.remote.timeoutMs)
       .then(result => { const rows = this.receipt(result, batch); this.status = 'refresh'; return rows; })
       .catch(error => { this.status = error?.committed === false ? 'error' : 'uncertain'; this.error = error?.message || String(error); return null; })
       .finally(onChange);
     onChange(); return this.promise;
   }
   dispose() { this.controller?.abort(); }
+}
+
+
+class IndexedDraftStorage {
+  constructor(factory = globalThis.indexedDB) { this.factory = factory; }
+  open() {
+    return this.opening ||= new Promise((resolve, reject) => {
+      if (!this.factory) { reject(Error('이 환경에서는 IndexedDB를 사용할 수 없습니다.')); return; }
+      const request = this.factory.open('moa-grid-recovery', 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('drafts', { keyPath: 'id' });
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(Error('다른 탭이 임시 저장소 업그레이드를 막고 있습니다.'));
+      request.onsuccess = () => { this.db = request.result; this.db.onversionchange = () => this.db.close(); resolve(this.db); };
+    });
+  }
+  async transaction(mode, action) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      let transaction;
+      try { transaction = db.transaction('drafts', mode, mode === 'readwrite' ? { durability: 'strict' } : undefined); }
+      catch (error) { if (error.name !== 'TypeError') { reject(error); return; } transaction = db.transaction('drafts', mode); }
+      let result;
+      transaction.oncomplete = () => resolve(result);
+      transaction.onabort = () => reject(transaction.error || Error('임시 저장 트랜잭션이 취소됐습니다.'));
+      transaction.onerror = () => {};
+      try { action(transaction.objectStore('drafts'), value => { result = value; }); }
+      catch (error) { transaction.abort(); reject(error); }
+    });
+  }
+  list(key) { return this.transaction('readonly', (store, result) => { store.getAll().onsuccess = event => result(event.target.result.filter(item => item.key === key)); }); }
+  put(record) { return this.transaction('readwrite', store => store.put(record)); }
+  remove(id, expected) {
+    return this.transaction('readwrite', (store, result) => {
+      store.get(id).onsuccess = event => {
+        const current = event.target.result;
+        if (!current || expected && (current.data !== expected.data || current.updatedAt !== expected.updatedAt)) { result(!current); return; }
+        store.delete(id); result(true);
+      };
+    });
+  }
+  close() { this.opening?.then(db => db.close(), () => {}); }
+}
+
+// Each writer owns a separate record. A tab never replaces another tab's draft.
+class DraftRecovery {
+  constructor(options, { schema, storage = new IndexedDraftStorage(), onChange = () => {} }) {
+    if (!options || typeof options.key !== 'string' || !options.key.trim() || options.key.length > 500) throw Error('recovery.key에는 사용자·화면·데이터를 구분하는 문자열이 필요합니다.');
+    this.maxBytes = options.maxBytes ?? 2 * 1024 * 1024;
+    if (!Number.isSafeInteger(this.maxBytes) || this.maxBytes < 1024 || this.maxBytes > 20 * 1024 * 1024) throw Error('recovery.maxBytes는 1KB~20MB여야 합니다.');
+    this.key = options.key; this.schema = schema; this.storage = storage; this.onChange = onChange;
+    this.id = requestToken(); this.candidates = []; this.loading = true; this.awaiting = false;
+    this.desired = this.committed = null; this.error = null; this.savedAt = null;
+    this.ready = storage.list(this.key).then(records => {
+      this.candidates = records.filter(item => typeof item.id === 'string' && typeof item.data === 'string').sort((a, b) => b.updatedAt - a.updatedAt);
+      this.awaiting = this.candidates.length > 0;
+    }).catch(error => { this.error = error.message || String(error); }).finally(() => { this.loading = false; this.onChange(); });
+  }
+  get blocked() { return this.loading || this.awaiting; }
+  getState() {
+    return { enabled: true, status: this.loading ? 'loading' : this.awaiting ? 'available' : this.error ? 'error' : this.writer ? 'writing' : this.committed != null ? 'saved' : 'idle', candidates: this.candidates.length, savedAt: this.savedAt, error: this.error };
+  }
+  candidate(id = this.candidates[0]?.id) { return this.candidates.find(item => item.id === id); }
+  read(id) {
+    const item = this.candidate(id);
+    if (!item) throw Error('복구할 임시 저장본이 없습니다.');
+    if (item.schema !== this.schema) throw Error('컬럼/스키마가 달라 자동 복구할 수 없습니다. 복구본을 내려받아 확인하세요.');
+    const snapshot = JSON.parse(item.data);
+    if (!snapshot || snapshot.format !== 1) throw Error('지원하지 않는 복구본입니다.');
+    return snapshot;
+  }
+  adopt(id) { this.source = this.candidate(id); this.candidates = this.candidates.filter(item => item.id !== id); this.awaiting = false; this.onChange(); }
+  async discard(id) {
+    const item = this.candidate(id); if (!item) return false;
+    if (!await this.storage.remove(item.id, item)) throw Error('다른 탭이 복구본을 갱신했습니다. 다시 열어 최신 복구본을 확인하세요.');
+    this.candidates = this.candidates.filter(record => record.id !== item.id); this.awaiting = this.candidates.length > 0; this.onChange(); return true;
+  }
+  write(snapshot) {
+    if (this.disposed || this.blocked) return false;
+    try {
+      const data = snapshot == null ? null : JSON.stringify(snapshot);
+      if (data != null && new TextEncoder().encode(data).length > this.maxBytes) throw Error('임시 저장 크기 한도를 초과했습니다. 복구본을 내려받거나 더 작은 데이터 구간을 사용하세요.');
+      this.desired = data; this.invalid = false;
+    } catch (error) { this.invalid = true; this.error = error.message; this.onChange(); return false; }
+    this.drain(); return true;
+  }
+  drain() {
+    if (this.writer || this.invalid || this.desired === this.committed && !this.source) return;
+    this.writer = (async () => {
+      try {
+        while (this.desired !== this.committed) {
+          const data = this.desired, updatedAt = Date.now();
+          if (data == null) await this.storage.remove(this.id);
+          else await this.storage.put({ id: this.id, key: this.key, schema: this.schema, updatedAt, data });
+          this.committed = data; this.savedAt = data == null ? null : updatedAt; this.error = null;
+        }
+        if (this.source) { await this.storage.remove(this.source.id, this.source); this.source = null; }
+        this.error = null;
+        return true;
+      } catch (error) { this.error = `임시 저장 실패: ${error.message || error}`; return false; }
+      finally { this.writer = null; this.onChange(); }
+    })();
+    this.onChange();
+  }
+  async flush() {
+    if (this.blocked || this.invalid) return false;
+    this.drain(); if (this.writer && !await this.writer) return false;
+    return this.desired === this.committed && !this.error;
+  }
+  dispose() { this.disposed = true; Promise.resolve(this.writer).finally(() => this.storage.close()); }
 }
 
 
@@ -780,10 +890,12 @@ class Grid {
     this.host = typeof target === 'string' ? document.querySelector(target) : target;
     if (!this.host || this.host.childNodes.length) throw new Error('비어 있는 그리드 컨테이너가 필요합니다.');
     this.options = options;
+    if (options.recovery && (options.model || options.dataSource && !options.dataSource.save || options.editable === false)) throw Error('복구 기능은 편집 가능한 독립 로컬/서버 save 그리드에서 사용하세요.');
     if (options.dataSource && (options.model || options.data?.length || options.formulas || options.tree || options.groupBy?.length)) throw new Error('서버 데이터는 공유 모델·초기 데이터·A1 수식·그룹·트리와 함께 사용하지 않습니다.');
     this.model = options.model || new GridModel(options.columns, options.data || [], { ...options, editable: options.dataSource ? false : options.editable });
     if (options.dataSource) this.remote = new RemoteData(options.dataSource, { onChange: () => this.renderRemote(), convertRow: row => { const item = { ...row }; for (const column of this.columns) item[column.field] = this.model.convert(column, row[column.field]); this.remoteChanges?.validateVersions([item]); return item; } });
     this.columns = options.model ? options.columns.map(column => ({ ...column })) : this.model.columns;
+    this.baseEditable = this.model.editable;
     if (options.dataSource?.save != null && typeof options.dataSource.save !== 'function') throw Error('dataSource.save는 함수여야 합니다.');
     if (options.dataSource?.save && options.editable !== false) this.remoteChanges = new RemoteChanges(this.remote, this.model);
     this.virtual = options.virtual !== false; this.rowHeight = 48;
@@ -817,7 +929,9 @@ class Grid {
     this.removeButton = button('선택 행 삭제', () => this.deleteSelectedRows());
     this.saveButton = button('변경 저장', () => this.saveChanges()); this.saveButton.hidden = !this.remoteChanges;
     this.discardButton = button('변경 취소', () => this.discardChanges()); this.discardButton.hidden = !this.remoteChanges;
-    window.addEventListener('beforeunload', event => { if (this.remoteChanges?.dirty || this.remoteChanges?.locked) { event.preventDefault(); event.returnValue = ''; } }, { signal });
+    window.addEventListener('beforeunload', event => { this.persistDraft(); if (this.remoteChanges?.dirty || this.remoteChanges?.locked || this.recovery && this.isDraftDirty()) { event.preventDefault(); event.returnValue = ''; } }, { signal });
+    window.addEventListener('pagehide', () => this.persistDraft(), { signal });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') this.persistDraft(); }, { signal });
     this.filterButton = button('필터', () => { this.filterPanel.hidden = !this.filterPanel.hidden; this.filterButton.setAttribute('aria-expanded', String(!this.filterPanel.hidden)); });
     this.filterButton.setAttribute('aria-expanded', 'false');
     this.mergeButton = button('셀 병합', () => this.mergeSelection()); this.unmergeButton = button('병합 해제', () => this.unmergeSelection());
@@ -858,7 +972,16 @@ class Grid {
     this.retryButton.addEventListener('click', () => this.retryLoad(), { signal });
     this.reloadButton = node('button', '서버 새로고침'); this.reloadButton.type = 'button'; this.reloadButton.addEventListener('click', () => this.reload(), { signal });
     this.loadState.append(this.loadText, this.retryButton, this.reloadButton);
-    this.root.append(this.toolbar, this.filterPanel, this.loadState, this.viewport, this.navigation, this.status, this.fileInput);
+    this.recoveryPanel = node('div', null, 'moa-grid__recovery'); this.recoveryPanel.hidden = true;
+    this.recoveryText = node('span'); this.recoveryText.setAttribute('role', 'status'); this.recoveryText.setAttribute('aria-live', 'polite');
+    this.draftSelect = node('select'); this.draftSelect.setAttribute('aria-label', '복구할 임시 저장본');
+    const recoveryButton = (text, action) => { const control = node('button', text); control.type = 'button'; control.addEventListener('click', action, { signal }); this.recoveryPanel.append(control); return control; };
+    this.recoveryPanel.append(this.recoveryText, this.draftSelect);
+    this.restoreButton = recoveryButton('임시 저장 복구', () => this.restoreDraft(this.draftSelect.value));
+    this.deleteDraftButton = recoveryButton('복구본 삭제', () => this.discardDraft(this.draftSelect.value));
+    this.downloadDraftButton = recoveryButton('복구본 내려받기', () => this.downloadDraft(this.draftSelect.value));
+    this.retryDraftButton = recoveryButton('임시 저장 재시도', () => this.flushDraft());
+    this.root.append(this.toolbar, this.filterPanel, this.loadState, this.recoveryPanel, this.viewport, this.navigation, this.status, this.fileInput);
     if (this.remote) { this.modeSelect.querySelector('[value=virtual]').disabled = true; this.groupSelect.disabled = true; }
  this.host.append(this.root);
     this.table.addEventListener('keydown', event => this.onKey(event), { signal });
@@ -894,7 +1017,7 @@ class Grid {
       this.dataRevision++;
       if (this.editor) { this.message('외부 데이터가 변경됐습니다. 편집을 취소하고 다시 입력하세요.', true); return; }
       if (reason === 'reset') { this.resetRowWindow(); this.resetSelection(); }
-      this.merges = []; this.render();
+      this.merges = []; this.render(); this.persistDraft();
     });
     this.resizeObserver = new ResizeObserver(() => { if (this.virtualActive && !this.editor) this.renderViewport(); else this.updateColumnGeometry(); if (!this.editor) this.maybeLoadMore(); }); this.resizeObserver.observe(this.viewport);
     this.table.addEventListener('copy', event => {
@@ -927,6 +1050,12 @@ class Grid {
       } catch (error) { this.message(error.message, true); }
     }, { signal });
     try {
+      if (options.recovery) {
+        this.localDraftBaseline = JSON.stringify(this.model.rows);
+        const schema = JSON.stringify([options.recovery.schemaVersion ?? '1', this.columns.map(({ field, type, editable, required }) => [field, type ?? 'text', editable !== false, !!required]), this.remote ? [this.remote.rowKey, this.remoteChanges.versionField] : null, !!options.formulas, options.tree ?? null]);
+        this.recovery = new DraftRecovery(options.recovery, { schema, onChange: () => this.updateRecoveryControls() });
+        this.recoveryReady = this.recovery.ready.then(() => { if (!this.destroyed) this.persistDraft(); return !this.recovery.error; });
+      } else this.recoveryReady = Promise.resolve(true);
       this.render();
       if (options.frozenColumns) this.setFrozenColumns(options.frozenColumns);
       if (options.tree) this.setTree(options.tree);
@@ -936,9 +1065,123 @@ class Grid {
 
   get editable() { return this.model.editable && this.options.editable !== false; }
 
+  updateEditability() {
+    if (!this.remote && !this.recovery) return;
+    this.model.editable = !this.recovery?.blocked && (this.remote ? !!this.remoteChanges && !this.remote.loading && !this.remote.error && !this.remoteChanges.locked : this.baseEditable);
+  }
+  isDraftDirty() {
+    if (this.recovery?.awaiting) return true;
+    const editorChanged = this.editor && this.editor.input.value !== String(this.model.rows[this.editor.dataRow]?.[this.editor.column.field] ?? '');
+    return !!editorChanged || (this.remoteChanges ? this.remoteChanges.dirty || this.remoteChanges.locked : JSON.stringify(this.model.rows) !== this.localDraftBaseline);
+  }
+  getRecoveryState() { return this.recovery ? { ...this.recovery.getState(), dirty: this.isDraftDirty() } : { enabled: false, status: 'disabled', dirty: false }; }
+  updateRecoveryControls() {
+    if (this.destroyed || !this.recovery) return;
+    const state = this.recovery.getState(), previous = this.model.editable;
+    this.updateEditability(); this.recoveryPanel.hidden = false; this.recoveryPanel.classList.toggle('is-error', !!state.error);
+    const messages = { loading: '임시 저장본을 확인하는 중…', available: `복구할 미저장 작업 ${state.candidates}개가 있습니다. 복구하거나 삭제한 뒤 편집하세요.`, writing: '브라우저에 임시 저장 중…', saved: `브라우저 임시 저장 완료 · ${new Date(state.savedAt).toLocaleTimeString()}`, idle: '미저장 작업 자동 복구 사용 중' };
+    this.recoveryText.textContent = state.error || messages[state.status];
+    const selected = this.draftSelect.value;
+    this.draftSelect.replaceChildren(...this.recovery.candidates.map(item => { const option = node('option', `${new Date(item.updatedAt).toLocaleString()} · ${item.id.slice(0, 6)}`); option.value = item.id; return option; }));
+    if (this.recovery.candidate(selected)) this.draftSelect.value = selected;
+    for (const control of [this.draftSelect, this.restoreButton, this.deleteDraftButton]) control.hidden = !this.recovery.awaiting;
+    this.downloadDraftButton.hidden = !this.recovery.awaiting && !state.error;
+    this.retryDraftButton.hidden = !state.error || this.recovery.awaiting;
+    if (!this.remoteChanges) { this.discardButton.hidden = false; this.discardButton.disabled = this.recovery.blocked || !this.isDraftDirty(); }
+    if (this.view && previous !== this.model.editable && !this.editor) this.renderViewport();
+  }
+  snapshotDraft() {
+    if (this.remoteChanges?.status === 'refresh' && this.refreshDraftSnapshot) return this.refreshDraftSnapshot;
+    if (!this.recovery || !this.isDraftDirty()) return null;
+    const editor = this.editor ? { row: this.editor.dataRow, field: this.editor.column.field, value: this.editor.input.value, start: this.editor.input.selectionStart, end: this.editor.input.selectionEnd } : null;
+    const result = { format: 1, kind: this.remote ? 'server' : 'local', rows: this.getData({ raw: true }), baseline: this.remoteChanges?.baseline ?? JSON.parse(this.localDraftBaseline), editor };
+    if (this.remote) result.server = { criteria: this.remote.criteria, mode: this.dataMode, pageSize: this.pageSize, offset: this.remote.offset, total: this.remote.total, status: this.remoteChanges.status, error: this.remoteChanges.error, pending: ['saving', 'uncertain'].includes(this.remoteChanges.status) ? this.remoteChanges.pending : null };
+    return result;
+  }
+  persistDraft(force = false) {
+    if (this.restoringDraft) return false;
+    if (!this.recovery || this.recovery.blocked || this.destroyed || !force && this.remote && (this.remote.loading || this.remoteChanges.status === 'refresh')) return !this.recovery?.blocked;
+    if (this.remoteChanges?.status !== 'refresh') this.refreshDraftSnapshot = null;
+    const snapshot = this.snapshotDraft();
+    if (this.remoteChanges?.status === 'refresh') this.refreshDraftSnapshot = snapshot;
+    return this.recovery.write(snapshot);
+  }
+  async flushDraft() {
+    if (!this.recovery) return true;
+    await this.recoveryReady; if (!this.persistDraft(true)) return false; return this.recovery.flush();
+  }
+  markSaved() {
+    if (this.remote || !this.recovery || this.recovery.blocked || !this.finishEdit()) return Promise.resolve(false);
+    this.localDraftBaseline = JSON.stringify(this.model.rows); return this.flushDraft();
+  }
+  async restoreDraft(id = this.draftSelect.value) {
+    if (!this.recovery?.awaiting) return false;
+    try {
+      const draft = this.recovery.read(id);
+      if (draft.kind !== (this.remote ? 'server' : 'local')) throw Error('다른 데이터 모드의 복구본입니다.');
+      for (const rows of [draft.rows, draft.baseline]) {
+        if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== 'object' || Array.isArray(row))) throw Error('복구 행 형식이 올바르지 않습니다.');
+        for (const row of rows) for (const column of this.model.columns) this.model.convert({ ...column, required: false, validate: undefined }, row[column.field]);
+        this.model.validateRows?.(rows);
+      }
+      if (draft.editor && (!Number.isInteger(draft.editor.row) || draft.editor.row < 0 || draft.editor.row >= draft.rows.length || !this.columns.some(column => column.field === draft.editor.field && column.editable !== false) || typeof draft.editor.value !== 'string')) throw Error('복구할 입력창 위치가 올바르지 않습니다.');
+      if (this.remote) {
+        const state = draft.server;
+        if (!state || !['pagination', 'infinite'].includes(state.mode) || !Number.isInteger(state.offset) || state.offset < 0 || !Number.isSafeInteger(state.total) || state.total < 0 || !state.criteria || typeof state.criteria.query !== 'string' || !Array.isArray(state.criteria.sorts) || !Array.isArray(state.criteria.filters) || !['and', 'or'].includes(state.criteria.filterLogic) || !['idle', 'error', 'saving', 'uncertain', 'refresh'].includes(state.status)) throw Error('서버 복구 상태가 올바르지 않습니다.');
+        validatePageSize(state.pageSize); this.remote.validateRows(draft.baseline);
+        if (draft.editor && ['saving', 'uncertain', 'refresh'].includes(state.status)) throw Error('잠긴 서버 저장 상태에 입력창이 포함돼 있습니다.');
+        const model = new GridModel(this.model.columns, draft.rows), journal = new RemoteChanges(this.remote, model); journal.reset(draft.baseline); const changes = journal.getChanges();
+        if (['saving', 'uncertain'].includes(state.status) && (!state.pending || !/^[a-f0-9]{32}$/.test(state.pending.requestId) || JSON.stringify(changes) !== JSON.stringify({ created: state.pending.created, updated: state.pending.updated, deleted: state.pending.deleted }))) throw Error('미확정 저장 요청과 복구 행이 일치하지 않습니다.');
+      }
+      this.editor = null; this.merges = []; this.restoringDraft = true;
+      if (this.remote) {
+        this.remote.sequence++; this.remote.controller?.abort(); this.remote.loading = false; this.remote.error = null;
+        this.remote.pendingKey = null; this.remote.promise = Promise.resolve(true); this.ready = this.remote.promise;
+        const state = draft.server; this.query = state.criteria.query; this.search.value = this.query; this.sorts = state.criteria.sorts; this.filters = state.criteria.filters; this.filterLogic = state.criteria.filterLogic;
+        this.dataMode = state.mode; this.pageSize = state.pageSize; this.remote.criteria = state.criteria; this.remote.mode = state.mode; this.remote.pageSize = state.pageSize;
+        if (![...this.sizeSelect.options].some(option => Number(option.value) === state.pageSize)) { const option = node('option', String(state.pageSize)); option.value = state.pageSize; this.sizeSelect.append(option); }
+        this.updateFilterControls();
+        this.remote.queryKey = JSON.stringify([state.criteria, state.mode, state.pageSize]); this.remote.rows = draft.baseline; this.remoteRows = this.remote.rows; this.remote.offset = state.offset; this.remote.total = state.total;
+        this.remoteChanges.reset(draft.baseline); this.remoteChanges.status = state.status === 'saving' ? 'uncertain' : state.status; this.remoteChanges.error = state.error;
+        this.remoteChanges.pending = state.pending; this.remoteChanges.fingerprint = state.pending ? JSON.stringify({ created: state.pending.created, updated: state.pending.updated, deleted: state.pending.deleted }) : null;
+      } else {
+        this.localDraftBaseline = JSON.stringify(draft.baseline);
+        this.query = ''; this.search.value = ''; this.filters = []; this.sorts = []; this.collapsedGroups.clear(); this.collapsedNodes.clear(); this.updateFilterControls();
+      }
+      this.mutateModel('setData', draft.rows); this.dataRevision++; this.resetSelection(); this.recovery.adopt(id);
+      if (this.remote) this.renderRemote(); else this.render();
+      this.focusCell();
+      if (draft.editor && this.editable) {
+        this.revealDataRow(draft.editor.row); const row = this.view.findIndex(item => item.index === draft.editor.row), col = this.columns.findIndex(column => column.field === draft.editor.field);
+        if (row >= 0) { this.startEdit({ row, col }, draft.editor.value); this.editor?.input.setSelectionRange(draft.editor.start ?? 0, draft.editor.end ?? draft.editor.value.length); }
+        if (!this.editor || this.editor.column.field !== draft.editor.field) throw Error('복구할 입력창을 표시하지 못했습니다. 복구본은 보존됩니다.');
+      }
+      this.restoringDraft = false;
+      await this.flushDraft();
+      if (this.remoteChanges?.status === 'refresh') await this.reload();
+      return true;
+    } catch (error) {
+      this.restoringDraft = false;
+      if (this.recovery.source) { this.recovery.candidates.unshift(this.recovery.source); this.recovery.source = null; this.recovery.awaiting = true; this.editor = null; this.updateRecoveryControls(); }
+      this.message(`복구 실패: ${error.message}`, true); return false;
+    }
+  }
+  async discardDraft(id = this.draftSelect.value) {
+    if (!this.recovery?.awaiting) return false;
+    try { const result = await this.recovery.discard(id); this.persistDraft(); if (!this.recovery.awaiting) this.focusCell(); return result; }
+    catch (error) { this.message(error.message, true); return false; }
+  }
+  downloadDraft(id = this.draftSelect.value) {
+    if (!this.recovery) return false;
+    const snapshot = this.recovery.awaiting ? null : this.snapshotDraft();
+    const data = this.recovery.awaiting ? this.recovery.candidate(id)?.data : snapshot ? JSON.stringify(snapshot) : null;
+    if (!data) return false; this.downloadFile(new Blob([data], { type: 'application/json' }), 'moa-grid-draft.json'); return true;
+  }
+
   getChanges() { return this.remoteChanges?.getChanges() ?? { created: [], updated: [], deleted: [] }; }
   getSaveState() { return this.remoteChanges?.getState() ?? { status: 'readonly', dirty: false, error: null, requestId: null }; }
   canLeaveRemote(quiet = false) {
+    if (this.recovery?.blocked) { this.message('임시 저장본을 확인하고 복구하거나 삭제하세요.', true); return false; }
     if (!this.remoteChanges) return true;
     if (this.editor && !this.finishEdit()) return false;
     if (!this.remoteChanges.dirty && !this.remoteChanges.locked) return true;
@@ -951,10 +1194,10 @@ class Grid {
     if (this.savePromise) return this.savePromise;
     if (this.remote.loading || this.editor && !this.finishEdit()) return Promise.resolve(false);
     this.exportRequest?.abort();
-    const pending = this.remoteChanges.save(() => { if (!this.destroyed) this.renderRemote(); });
+    const pending = this.remoteChanges.save(() => { if (!this.destroyed) this.renderRemote(); }, async () => { if (!await this.flushDraft()) throw Object.assign(Error('저장 요청의 복구 정보를 기록하지 못했습니다. 임시 저장 오류를 먼저 해결하세요.'), { committed: false }); });
     this.savePromise = pending.then(async rows => {
       if (!rows || this.destroyed) return false;
-      this.mutateModel('setData', rows); this.remoteChanges.reset(rows); this.remoteChanges.status = 'refresh'; this.dataRevision++; this.renderRemote();
+      this.mutateModel('setData', rows); this.remoteChanges.reset(rows); this.remoteChanges.status = 'refresh'; this.refreshDraftSnapshot = null; this.dataRevision++; this.renderRemote(); this.persistDraft(true);
       const refreshed = await this.remote.reload();
       if (!this.destroyed) this.message(refreshed ? '서버에 변경 내용을 저장했습니다.' : '저장은 완료됐지만 목록 갱신에 실패했습니다. 다시 불러오세요.', !refreshed);
       return true;
@@ -962,9 +1205,12 @@ class Grid {
     return this.savePromise;
   }
   discardChanges() {
+    if (!this.remote && this.recovery && !this.recovery.blocked) {
+      this.editor = null; this.mutateModel('setData', JSON.parse(this.localDraftBaseline)); this.dataRevision++; this.resetSelection(); this.render(); return this.flushDraft();
+    }
     if (!this.remoteChanges || this.destroyed || this.remoteChanges.locked || this.remote.loading) return Promise.resolve(false);
     this.cancelEdit(); this.mutateModel('setData', this.remoteChanges.baseline); this.dataRevision++;
-    this.remoteChanges.reset(this.model.rows); this.remoteChanges.status = 'refresh'; this.renderRemote();
+    this.remoteChanges.reset(this.model.rows); this.remoteChanges.status = 'refresh'; this.refreshDraftSnapshot = null; this.renderRemote(); this.persistDraft(true);
     return this.ready = this.remote.reload();
   }
 
@@ -978,9 +1224,9 @@ class Grid {
       if (refreshing && this.remote.loading) this.remoteChanges.status = 'refresh';
       this.merges = []; if (!append) this.resetSelection();
     }
-    this.model.editable = !!this.remoteChanges && !this.remote.loading && !this.remote.error && !this.remoteChanges.locked;
+    this.updateEditability();
     // Ordering and filtering were already applied to the complete dataset by the server.
-    this.fullResult = buildDisplay(this.model.rows, { columns: this.columns }); this.applyRowWindow();
+    this.fullResult = buildDisplay(this.model.rows, { columns: this.columns }); this.applyRowWindow(); this.persistDraft();
   }
   updateRemoteControls() {
     const { loading, error, total, lastRequest } = this.remote;
@@ -1179,6 +1425,7 @@ class Grid {
   }
 
   render() {
+    this.updateEditability();
     if (this.remote) {
       const previousKey = this.remote.queryKey;
       this.ready = this.remote.configure({ query: this.query, sorts: this.sorts, filters: this.filters, filterLogic: this.filterLogic }, this.dataMode, this.pageSize);
@@ -1301,7 +1548,7 @@ class Grid {
     this.importButton.disabled = !this.xlsx || !this.editable || !!this.remote;
     this.paintSelection();
     if (hadFocus && focusedCell) (this.cellElement(focusedCell) || this.table).focus({ preventScroll: true });
-    this.message(this.remoteChanges && !this.editable ? '저장·조회 상태를 확인하세요. 편집은 잠겨 있습니다.' : this.remote && !this.remoteChanges ? `${this.view.length}행 표시 · 서버 데이터는 읽기 전용입니다.` : this.view.length ? `${this.view.length}행${this.virtualActive ? ' · 가상 스크롤' : ''} · 셀 더블클릭 또는 F2로 편집` : '표시할 데이터가 없습니다. 검색·필터 조건을 확인하세요.');
+    this.message(this.recovery?.blocked ? '복구할 작업을 선택하세요. 편집은 잠겨 있습니다.' : this.remoteChanges && !this.editable ? '저장·조회 상태를 확인하세요. 편집은 잠겨 있습니다.' : this.remote && !this.remoteChanges ? `${this.view.length}행 표시 · 서버 데이터는 읽기 전용입니다.` : this.view.length ? `${this.view.length}행${this.virtualActive ? ' · 가상 스크롤' : ''} · 셀 더블클릭 또는 F2로 편집` : '표시할 데이터가 없습니다. 검색·필터 조건을 확인하세요.');
   }
 
   message(text, error = false) { this.status.textContent = text; this.status.classList.toggle('is-error', error); }
@@ -1349,13 +1596,16 @@ class Grid {
       return item;
     });
     if (this.editor && !this.finishEdit()) return false;
-    this.filters = prepared; this.filterLogic = logic; this.logicSelect.value = logic; this.merges = []; this.resetSelection(); this.filterList.replaceChildren();
+    this.filters = prepared; this.filterLogic = logic; this.merges = []; this.resetSelection(); this.updateFilterControls();
+    this.render(); return true;
+  }
+  updateFilterControls() {
+    this.logicSelect.value = this.filterLogic; this.filterList.replaceChildren();
     this.filters.forEach((filter, index) => {
       const column = this.columns.find(column => column.field === filter.field);
       const remove = node('button', `${column.header || column.field}: ${filter.operator} ${filter.value ?? ''}${filter.operator === 'between' ? ' ~ ' + filter.value2 : ''} ×`); remove.type = 'button';
       remove.setAttribute('aria-label', `${index + 1}번 필터 제거`); remove.addEventListener('click', () => this.setFilters(this.filters.filter((_, item) => item !== index))); this.filterList.append(remove);
     });
-    this.render(); return true;
   }
 
   setSorts(sorts) {
@@ -1591,6 +1841,7 @@ class Grid {
     if (column.type === 'number') input.inputMode = 'decimal';
     input.value = initial ?? this.model.rows[dataRow][column.field] ?? '';
     this.editor = { input, cell: { ...cell }, dataRow, column, revision: this.model.revision, composing: false };
+    input.addEventListener('input', () => this.persistDraft());
     input.addEventListener('compositionstart', () => { if (this.editor?.input === input) this.editor.composing = true; });
     input.addEventListener('compositionend', () => { if (this.editor?.input === input) this.editor.composing = false; });
     input.addEventListener('keyup', event => { if (event.key === 'Enter' || event.code === 'Enter' || event.code === 'NumpadEnter') { if (this.editor?.input === input) this.editor.compositionConfirm = false; } });
@@ -1619,7 +1870,7 @@ class Grid {
     });
   }
 
-  cancelEdit() { this.editor = null; this.render(); this.focusCell(); this.message('편집을 취소했습니다.'); }
+  cancelEdit() { this.editor = null; this.render(); this.focusCell(); this.persistDraft(); this.message('편집을 취소했습니다.'); }
   finishEdit() {
     if (!this.editor) return true;
     if (this.editor.composing) return false;
@@ -1694,14 +1945,20 @@ class Grid {
     if (changes.length) this.dataRevision++;
     if (changes.length && (this.query.trim() || this.filters.length || this.sorts.length)) this.merges = [];
     if (changes.some(change => change.kind === 'rows')) { this.merges = []; this.resetSelection(); }
-    this.render(); this.focusCell();
+    this.render(); this.focusCell(); this.persistDraft();
     this.message(changes.length ? `${changes.some(change => change.kind === 'rows') ? '행 데이터' : changes.length + '셀'} ${reason === 'undo' ? '되돌림' : reason === 'redo' ? '다시 적용' : '변경'} · ${this.model.canUndo ? 'Ctrl+Z로 되돌리기' : '되돌릴 작업 없음'}` : '변경된 셀이 없습니다.');
     if (changes.length) this.options.onChange?.({ reason, changes, data: this.getData() });
   }
   getData({ raw = false } = {}) { return raw ? this.model.getData() : this.model.getComputedData(); }
   mutateModel(method, ...args) { this.localWrite = true; try { return this.model[method](...args); } finally { this.localWrite = false; } }
   setSearch(query) { clearTimeout(this.searchTimer); if (!this.canLeaveRemote()) return false; if (this.editor) this.cancelEdit(); this.query = String(query); this.search.value = this.query; this.merges = []; this.resetSelection(); this.render(); return true; }
-  setData(rows) { if (this.remote) throw new Error('서버 데이터는 reload()로 갱신하세요.'); this.resetRowWindow(); this.mutateModel('setData', rows); this.dataRevision++; this.editor = null; this.merges = []; this.resetSelection(); this.render(); }
+  setData(rows) {
+    if (this.remote) throw new Error('서버 데이터는 reload()로 갱신하세요.');
+    if (this.recovery && !this.recovery.blocked && this.isDraftDirty()) { this.message('미저장 작업을 저장하거나 discardChanges()로 취소한 뒤 데이터를 교체하세요.', true); return false; }
+    this.resetRowWindow(); this.mutateModel('setData', rows);
+    if (this.recovery) this.localDraftBaseline = JSON.stringify(this.model.rows);
+    this.dataRevision++; this.editor = null; this.merges = []; this.resetSelection(); this.render(); this.persistDraft(); return true;
+  }
   downloadCSV() {
     if (this.remoteChanges?.locked) return false;
     if (this.editor && !this.finishEdit()) return;
@@ -1714,7 +1971,7 @@ class Grid {
     const blob = new Blob(['\uFEFF' + rows.map(row => row.map(quote).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
     this.downloadFile(blob, 'moa-grid.csv'); this.message('검색·정렬된 데이터를 CSV로 내보냈습니다.');
   }
-  destroy() { this.destroyed = true; clearTimeout(this.searchTimer); this.remote?.dispose(); this.remoteChanges?.dispose(); this.exportRequest?.abort(); this.editor = null; this.resizeObserver.disconnect(); this.unsubscribe?.(); cancelAnimationFrame(this.scrollFrame); this.events.abort(); this.root.remove(); }
+  destroy() { this.persistDraft(); this.destroyed = true; clearTimeout(this.searchTimer); this.remote?.dispose(); this.remoteChanges?.dispose(); this.recovery?.dispose(); this.exportRequest?.abort(); this.editor = null; this.resizeObserver.disconnect(); this.unsubscribe?.(); cancelAnimationFrame(this.scrollFrame); this.events.abort(); this.root.remove(); }
 }
 
 

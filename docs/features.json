@@ -222,12 +222,12 @@
       "category": "BASE",
       "name": "원본 롤백",
       "phase": "M1",
-      "status": "partial",
+      "status": "implemented",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/data-manager/data-rollback"
       ],
-      "acceptance": "서버 save 모드의 미저장 변경 취소·최신 버전 재조회; 로컬/RealGrid 롤백 API는 후속"
+      "acceptance": "로컬 recovery와 서버 save 모드에서 마지막 저장 기준점으로 취소. Undo와 별도 API 사용; RealGrid 교체 호환은 아님"
     },
     {
       "id": "BASE-015",

@@ -71,14 +71,14 @@ watch는 rows 배열 참조 교체만 관찰합니다. 새 조회 결과는 `row
 
 ## 예제 개발 검증 (선택)
 
-아래는 라이브러리 사용자의 설치 절차가 아니라 저장소 개발용 검사입니다. Node·Playwright와 Chromium/Firefox/WebKit을 준비한 환경에서 실행합니다. 테스트용 도구는 무시되는 output 아래에만 설치하며 라이브러리 런타임 의존성에 포함하지 않습니다.
+저장소 개발용 검사이며, 소비자 프로젝트의 설치 절차와 구분합니다. Node 22에서 다음을 실행합니다. 도구는 devDependencies로 관리하며 라이브러리 런타임에 포함하지 않습니다.
 
 ```sh
-node -e "require('node:fs').mkdirSync('output/npm', { recursive: true })"
-npm pack ./packages/grid --pack-destination output/npm
-npm install --prefix output/usage-consumer --offline --ignore-scripts --package-lock=false --no-audit --no-fund ./output/npm/moa-js-grid-0.6.0.tgz
-npm install --prefix output/usage-tooling --package-lock=false --no-audit --no-fund react@19.2.3 react-dom@19.2.3 vue@3.5.45 @vue/compiler-sfc@3.5.45 esbuild@0.25.12
-node scripts/browser-usage-check.mjs
+npm ci
+npx playwright install chromium firefox webkit
+npm run test:usage
 ```
 
-패키지 해시·CommonJS·브라우저 ESM, 가이드의 HTML을 그대로 복사한 별도 프로젝트, file:// 최소 예제, 실제 컴파일한 React StrictMode/Vue 컴포넌트의 생성·편집·콜백 갱신·데이터 교체·해제/재생성을 검사합니다. 결과는 `output/playwright/usage/results.json`입니다. JSP 서버나 Next/Nuxt 애플리케이션 전체를 실행하는 검사는 포함하지 않습니다.
+패키지를 직접 만들고 별도 consumer 디렉터리에 오프라인 설치한 뒤, 가이드 HTML·CommonJS/ESM과 실제 컴파일한 React StrictMode/Vue 컴포넌트의 생성·편집·콜백 갱신·데이터 교체·해제/재생성을 검사합니다. 결과는 output/playwright/usage/results.json입니다. JSP 서버나 Next/Nuxt 애플리케이션 전체 실행은 포함하지 않습니다.
+
+복구 기능을 추가할 때는 [recovery 키/저장 계약](recovery.md)을 적용하고 recoveryReady를 기다리세요. 새 조회 결과 교체 전에 dirty 상태를 확인해야 하며, 복구를 켜면 미저장 상태의 setData는 false로 차단됩니다.

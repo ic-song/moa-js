@@ -7,6 +7,7 @@
 | 수식·가상 스크롤·API 일부 이행 | [advanced/index.html](advanced/index.html) | 파일을 브라우저로 바로 열기 |
 | 서버 조회·페이징·무한 스크롤 | [server/index.html](server/index.html) | `node scripts/serve.mjs` 실행 후 HTTP로 열기 |
 | 서버 편집·추가·삭제·저장 | [server-edit/index.html](server-edit/index.html) | 같은 HTTP 서버에서 열기 |
+| 새로고침·종료 후 미저장 복구 | [recovery/index.html](recovery/index.html) | HTTP 서버에서 로컬/서버 모드 선택 |
 | React 프로젝트에 삽입 | [react/ProductGrid.jsx](react/ProductGrid.jsx) | 기존 React 빌드 프로젝트에 복사 |
 | Vue 3 프로젝트에 삽입 | [vue/ProductGrid.vue](vue/ProductGrid.vue) | 기존 Vue 빌드 프로젝트에 복사 |
 

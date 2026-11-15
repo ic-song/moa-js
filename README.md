@@ -1,10 +1,12 @@
 # Moa JS
 
+[![Check](https://github.com/ic-song/moa-js/actions/workflows/check.yml/badge.svg)](https://github.com/ic-song/moa-js/actions/workflows/check.yml) [![Browser](https://github.com/ic-song/moa-js/actions/workflows/browser.yml/badge.svg)](https://github.com/ic-song/moa-js/actions/workflows/browser.yml) [MIT License](LICENSE)
+
 **폐쇄망에서도 가져다 쓰는 업무용 JavaScript 도구함.** 첫 모듈은 엑셀 방식으로 조작하는 데이터 그리드입니다. 이름은 현재 가칭입니다.
 
 코어는 외부 런타임 의존성·CDN·웹폰트·온라인 인증·텔레메트리 없이 실행합니다. XLSX 파일 기능에는 로컬 동봉한 SheetJS Community Edition을 선택적으로 사용합니다. 프레임워크와 분리된 JS·CSS 파일을 제공하며 Moa 자체 코드는 상업적 사용과 수정·재배포가 가능한 MIT 라이선스입니다. 동봉 라이브러리는 [별도 Apache-2.0 라이선스](packages/grid/THIRD_PARTY_NOTICES.md)를 유지합니다.
 
-현재 **0.6.0**으로 로컬/서버 페이징·무한 스크롤, 서버 편집·추가·삭제·저장과 Excel 범위 다운로드를 제공합니다. A1 수식·그룹/트리·공개 API 일부 이행 계층도 포함합니다. RealGrid 공식 기능을 참고해 자체 구현하며 원본 코드·리소스를 포함하지 않습니다. RealGrid 전체 기능·API와의 호환성을 보장하지 않습니다. npm에는 아직 등록하지 않았습니다.
+현재 **0.7.0**으로 로컬/서버 편집·저장, 미저장 작업 복구, 페이징·무한 스크롤과 Excel 다운로드를 제공합니다. A1 수식·그룹/트리·공개 API 일부 이행 계층도 포함합니다. RealGrid 공식 기능을 참고해 자체 구현하며 원본 코드·리소스를 포함하지 않습니다. RealGrid 전체 기능·API와의 호환성을 보장하지 않습니다. npm에는 아직 등록하지 않았습니다.
 
 ## 다른 프로젝트에서 시작하기
 
@@ -30,9 +32,20 @@
 | HTML·JSP / 파일 복사 | [빠른 시작](docs/getting-started.md) · [최소 실행 예제](examples/quick-start/index.html) |
 | React·Vue / 로컬 tgz 설치 | [프레임워크 연결](docs/frameworks.md) · [React 컴포넌트](examples/react/ProductGrid.jsx) · [Vue 컴포넌트](examples/vue/ProductGrid.vue) |
 | 서버 API·페이지·변경 저장 | [조회 계약](docs/server-data.md) · [저장 계약](docs/server-editing.md) |
+| 새로고침·종료 후 미저장 복구 | [복구 설정과 보장 범위](docs/recovery.md) · [복구 예제](examples/recovery/index.html) |
 | 전체 옵션과 목적별 예제 | [API](packages/grid/README.md) · [예제 목록](examples/README.md) |
 
 다운로드한 배포 파일은 빌드 없이 사용합니다. LICENSE도 함께 배포하세요. Excel 셀 복사·붙여넣기에는 별도 모듈이 필요 없으며 `.xlsx` 파일 기능만 로컬 SheetJS를 선택적으로 추가합니다. 공개 npm 등록 전이므로 설치형 프로젝트에는 `npm pack ./packages/grid`로 만든 tgz를 사용합니다.
+
+## 0.7.0에 추가한 기능
+
+- 선택적으로 켜는 IndexedDB 임시 저장: 확정 데이터와 입력창의 미확정 값 복구
+- 탭별 복구본·사용자/데이터 키·스키마 구분, 저장 오류 표시와 복구본 내려받기
+- 서버 저장 요청 ID를 브라우저에 기록한 뒤 전송, 종료 후 원래 요청으로 결과 재확인
+- 실제 Chrome 프로세스 종료/재실행, 2,000회 편집·25회 생성/제거 반복 검사
+- [기여 가이드](CONTRIBUTING.md), [변경 기록](CHANGELOG.md), [보안](SECURITY.md)/[지원](SUPPORT.md), 이슈/PR 템플릿과 CI/수동 패키지 워크플로우
+
+복구는 기본 비활성화이며 `recovery: {key: '사용자:업무:데이터', schemaVersion: '1'}`로 켭니다. 마지막 임시 저장 완료본을 복구하며 브라우저 데이터 삭제·기록 완료 전 종료·전원 장애의 무손실을 보장하지 않습니다. [전체 계약](docs/recovery.md)을 확인하세요.
 
 ## 0.6.0에 추가한 기능
 
@@ -136,7 +149,7 @@ macOS는 Ctrl 대신 ⌘를 사용합니다. 셀 안에서 텍스트를 편집 �
 
 ## 인터넷 없이 빌드·모델 테스트
 
-Node.js 20 이상이 준비되어 있으면 외부 패키지 설치 없이 실행합니다.
+Node.js 22 이상이 준비되어 있으면 코어 검사·빌드는 외부 패키지 설치 없이 실행합니다.
 
 ```sh
 npm test
@@ -146,10 +159,10 @@ npm run catalog -- --check
 
 `npm run build`는 소스에서 브라우저 JS·ESM·CommonJS·CSS를 생성합니다. `npm run catalog`는 JSON 원본에서 기능 문서를 갱신합니다. 배포물은 저장소에 포함하므로 사용자가 빌드할 필요는 없습니다.
 
-브라우저 개발 검증 도구는 런타임과 별개입니다. Playwright와 Chromium을 준비한 개발 환경에서 `node scripts/serve.mjs`를 실행하고 다른 터미널에서 `node scripts/browser-check.mjs`, `node scripts/browser-advanced-check.mjs`, `node scripts/browser-followup-check.mjs`, `node scripts/browser-paging-check.mjs`를 실행합니다. 서버와 다중 엔진 검증은 Playwright의 Firefox/WebKit 및 axe-core 준비 후 `node scripts/browser-server-check.mjs`를 실행합니다. 폐쇄망에서는 이미 준비된 개발 도구를 반입하거나 배포 파일만 사용하세요. 실제 Excel 생성 파일·복사 데이터와 내보낸 파일 검증 방법은 [검증 기록](docs/verification.md)에 있습니다.
+개발 도구는 `npm ci`로 설치하고 `npx playwright install chromium firefox webkit`으로 브라우저를 준비합니다. `npm run dev` 실행 후 별도 터미널에서 `npm run test:browser`, `npm run test:recovery`, `npm run test:resilience`, `npm run test:usage`를 사용합니다. 개발 의존성은 런타임 패키지에 포함하지 않습니다. 폐쇄망에서는 캐시/사내 레지스트리 또는 배포 파일을 반입하세요. [기여·검증 절차](CONTRIBUTING.md)와 [검증 기록](docs/verification.md)에 자세한 범위를 적었습니다.
 
 ## 현재 한계
 
-로컬 변경은 메모리에 유지되며 자동 저장하지 않습니다. 서버 변경 저장은 `dataSource.save`와 호스트의 원자적 저장·버전·중복 방지 계약이 필요합니다. 예제 서버의 JSON 저장은 운영 DB/인증을 대체하지 않습니다. 자동 같은 값 병합·피벗·전체 Excel 수식은 후속 구현 대상입니다. 그룹과 트리는 별도 모드이며 수동 병합은 가상 스크롤이 꺼진 일반 모드에서 사용합니다. 전체 브라우저·네이티브 한글 IME·실제 스크린리더 호환성을 인증한 단계는 아닙니다.
+로컬 변경의 업무 서버 저장은 호스트가 구현합니다. 복구를 켜면 브라우저에 임시 보관하며 업무 서버 저장과 구분합니다. 서버 변경 저장은 `dataSource.save`와 호스트의 원자적 저장·버전·중복 방지 계약이 필요합니다. 예제 서버의 JSON 저장은 운영 DB/인증을 대체하지 않습니다. 자동 같은 값 병합·피벗·전체 Excel 수식은 후속 구현 대상입니다. 그룹과 트리는 별도 모드이며 수동 병합은 가상 스크롤이 꺼진 일반 모드에서 사용합니다. 전체 브라우저·네이티브 한글 IME·실제 스크린리더 호환성을 인증한 단계는 아닙니다.
 
 RealGrid는 기능 참고 대상의 제품명이며 이 프로젝트는 해당 제품과 제휴하지 않습니다. [MIT License](LICENSE)는 이 저장소의 자체 작성물에 적용됩니다.

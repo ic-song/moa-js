@@ -6,6 +6,8 @@ import { handleDemoAPI } from './demo-api.mjs';
 import { handleEditAPI } from './edit-api.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const port = Number(process.env.MOA_DEMO_PORT || 4173);
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error('MOA_DEMO_PORT must be 1–65535.');
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 http.createServer(async (request, response) => {
   try {
@@ -19,4 +21,4 @@ http.createServer(async (request, response) => {
     const content = await readFile(target);
     response.writeHead(200, { 'Content-Type': types[path.extname(target)] || 'application/octet-stream', 'Cache-Control': 'no-store' }); response.end(content);
   } catch { response.writeHead(404); response.end('Not found'); }
-}).listen(4173, '127.0.0.1', () => console.log('Moa demo: http://127.0.0.1:4173/examples/grid/index.html'));
+}).listen(port, '127.0.0.1', () => console.log(`Moa demo: http://127.0.0.1:${port}/examples/grid/index.html`));

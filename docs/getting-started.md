@@ -1,6 +1,6 @@
 # Moa Grid 빠른 시작
 
-JS·CSS를 넣고 `new MoaGrid(컨테이너, 옵션)`으로 생성합니다. 이 문서는 **0.6.0** 기준입니다. 코어에는 인터넷·Node·npm·빌드가 필요하지 않습니다. 서버 조회/저장은 사용하는 프로젝트의 API를 연결합니다.
+JS·CSS를 넣고 `new MoaGrid(컨테이너, 옵션)`으로 생성합니다. 이 문서는 **0.7.0** 기준입니다. 코어에는 인터넷·Node·npm·빌드가 필요하지 않습니다. 서버 조회/저장은 사용하는 프로젝트의 API를 연결합니다.
 
 ## 1. 파일 가져오기
 
@@ -117,10 +117,10 @@ grid.destroy();
 ```sh
 # 저장소 루트. 패키지 안에 코어 JS/CSS·선택 SheetJS·라이선스가 들어갑니다.
 npm pack ./packages/grid
-# 생성: moa-js-grid-0.6.0.tgz
+# 생성: moa-js-grid-0.7.0.tgz
 
 # 이 파일을 사용할 프로젝트로 복사한 뒤 해당 프로젝트에서 실행
-npm install --offline --no-audit --no-fund ./moa-js-grid-0.6.0.tgz
+npm install --offline --no-audit --no-fund ./moa-js-grid-0.7.0.tgz
 ```
 
 그리드 자체에는 외부 패키지 의존성이 없습니다. 기존 프로젝트의 다른 의존성 설치에는 해당 프로젝트의 캐시/사내 레지스트리가 필요할 수 있습니다. 폐쇄망에는 tgz 또는 배포 파일을 반입합니다. 사용하는 React/Vue 및 빌드 도구는 기존 프로젝트에서 준비하세요.
@@ -168,6 +168,10 @@ node scripts/serve.mjs
 - 연결 코드: [조회 콜백](../examples/server/demo.js), [저장 콜백](../examples/server-edit/demo.js)
 
 서버 예제는 로컬 JSON 파일/예시 데이터로 동작합니다. 운영 DB·인증은 포함하지 않습니다. 일반 로컬 그리드의 `getData()` 전체 저장 방식과 서버 모드의 `saveChanges()` 변경 묶음 저장 방식을 구분하세요.
+
+## 새로고침·종료 후 복구
+
+생성 옵션에 `recovery: { key: "로그인사용자:업무:문서", schemaVersion: "1" }`를 추가하면 마지막 임시 저장 완료본을 복구할 수 있습니다. 계정/데이터별 키, 저장 완료 표시, 서버 요청 재확인과 한계는 [복구 가이드](recovery.md)를 확인하세요. 기본값은 꺼짐입니다.
 
 ## 자주 만나는 문제
 

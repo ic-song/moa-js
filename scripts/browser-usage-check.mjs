@@ -9,7 +9,7 @@ import { chromium, firefox, webkit } from 'playwright';
 
 // Optional development tools and an offline-installed tgz consumer; see docs/frameworks.md.
 const client = path.resolve('output/usage-consumer'), output = path.resolve('output/playwright/usage');
-const tooling = createRequire(path.resolve('output/usage-tooling/package.json'));
+const tooling = createRequire(import.meta.url);
 const { build } = tooling('esbuild'), { parse, compileScript } = tooling('@vue/compiler-sfc');
 const consumer = createRequire(path.join(client, 'package.json')), pkg = path.join(client, 'node_modules/@moa-js/grid');
 const reports = [], record = message => { reports.push(message); console.log('PASS', message); };
@@ -43,7 +43,7 @@ ${shared}
 const input=ref(rows), handlerVersion=ref(version);let app;
 window.usage={rerender(){handlerVersion.value++;},replace(next){input.value=next;},unmount(){app.unmount();},mount(){app=createApp({setup:()=>()=>h(ProductGrid,{rows:input.value,onChange:e=>usageEvents.push({version:handlerVersion.value,data:e.data})})});app.mount('#app');}};usage.mount();`);
 for (const framework of ['react', 'vue']) {
-  await build({ entryPoints: [path.join(client, `src/${framework}-entry.js`)], bundle: true, outfile: path.join(client, `${framework}.js`), jsx: 'automatic', nodePaths: [path.resolve('output/usage-tooling/node_modules')], define: { 'process.env.NODE_ENV': '"development"' } });
+  await build({ entryPoints: [path.join(client, `src/${framework}-entry.js`)], bundle: true, outfile: path.join(client, `${framework}.js`), jsx: 'automatic', nodePaths: [path.resolve('node_modules')], define: { 'process.env.NODE_ENV': '"development"' } });
   await writeFile(path.join(client, `${framework}.html`), `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${framework} integration</title><link rel="stylesheet" href="/${framework}.css"><div id="app"></div><script src="/${framework}.js"></script></html>`);
 }
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };

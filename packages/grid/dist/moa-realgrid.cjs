@@ -1,4 +1,4 @@
-/*! Moa JS Grid v0.6.0 | MIT License | See LICENSE */
+/*! Moa JS Grid v0.7.0 | MIT License | See LICENSE */
 const { Grid, GridModel } = require('./moa-grid.cjs');
 
 class UnsupportedFeatureError extends Error {

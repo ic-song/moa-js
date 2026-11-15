@@ -4,13 +4,14 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+const DEMO_URL = process.env.MOA_DEMO_URL || 'http://127.0.0.1:4173';
 const output = path.resolve('output/playwright/paging'); await mkdir(output, { recursive: true });
 const exports = {}, sandbox = { module: { exports }, exports, ArrayBuffer, Uint8Array, Date };
 vm.runInNewContext(await readFile('packages/grid/vendor/sheetjs/xlsx.full.min.js', 'utf8'), sandbox); const XLSX = sandbox.module.exports;
 const browser = await chromium.launch({ headless: true }); const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:4173' });
+await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: `${DEMO_URL}` });
 const page = await context.newPage(), checks = [], errors = [], external = [];
-page.on('pageerror', error => errors.push(error.message)); page.on('request', request => { if (/^https?:/.test(request.url()) && !request.url().startsWith('http://127.0.0.1:4173/')) external.push(request.url()); });
+page.on('pageerror', error => errors.push(error.message)); page.on('request', request => { if (/^https?:/.test(request.url()) && !request.url().startsWith(`${DEMO_URL}/`)) external.push(request.url()); });
 const record = text => { checks.push(text); console.log('PASS', text); };
 const cell = (row, col) => page.locator(`#workbench td[data-row="${row}"][data-col="${col}"]`);
 async function reset(mode = 'pagination', count = 103, readonly = false) {
@@ -28,7 +29,7 @@ async function download(scope, name = scope) {
   const book = XLSX.read(await readFile(target), { type: 'buffer' }); return XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]], { header: 1, defval: '' });
 }
 try {
-  await page.goto('http://127.0.0.1:4173/examples/advanced/index.html'); await reset();
+  await page.goto(`${DEMO_URL}/examples/advanced/index.html`); await reset();
   assert.equal(await page.evaluate(() => workbench.getPagingState().pageCount), 5);
   await page.getByRole('button', { name: '다음', exact: true }).click(); assert.equal(await cell(0, 0).innerText(), 'R25');
   assert.equal(await page.locator('#workbench tbody th').first().innerText(), '26');

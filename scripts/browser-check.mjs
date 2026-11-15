@@ -5,12 +5,13 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+const DEMO_URL = process.env.MOA_DEMO_URL || 'http://127.0.0.1:4173';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'output/playwright'); await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-const origin = 'http://127.0.0.1:4173';
+const origin = `${DEMO_URL}`;
 await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
 const page = await context.newPage(), errors = [], remoteRequests = [], checks = [];
 page.on('pageerror', error => errors.push(error.message));

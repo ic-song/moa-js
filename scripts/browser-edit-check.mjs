@@ -2,6 +2,7 @@ import { chromium, firefox, webkit } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+const DEMO_URL = process.env.MOA_DEMO_URL || 'http://127.0.0.1:4173';
 const output = 'output/playwright/server-edit'; await mkdir(output, { recursive: true });
 const require = createRequire(import.meta.url), axe = await readFile(require.resolve('axe-core/axe.min.js'), 'utf8'), reports = [];
 for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
@@ -13,7 +14,7 @@ for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
   const save = () => page.evaluate(() => editGrid.saveChanges());
   const edit = async (value, row = 0, col = 1) => { await cell(row, col).click(); await page.keyboard.press('F2'); await page.locator('#edit-grid td input').fill(value); await page.keyboard.press('Enter'); };
   try {
-    await page.goto('http://127.0.0.1:4173/examples/server-edit/index.html'); assert.equal(await page.evaluate(() => editGrid.ready), true);
+    await page.goto(`${DEMO_URL}/examples/server-edit/index.html`); assert.equal(await page.evaluate(() => editGrid.ready), true);
     const initial = await page.evaluate(() => ({ row: { ...editGrid.model.rows[0] }, total: editGrid.remote.total }));
     assert.equal(await cell(0, 0).getAttribute('aria-readonly'), 'true'); assert.equal(await cell(0, 1).getAttribute('aria-readonly'), 'false');
     assert.equal(await page.getByRole('button', { name: 'XLSX 가져오기', exact: true }).isDisabled(), true);
@@ -52,7 +53,7 @@ for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
     await page.evaluate(() => editGrid.addRow({ name: '응답 끊김 검증' })); await page.getByRole('button', { name: '저장 후 응답 끊기', exact: true }).click(); assert.equal(await save(), false); assert.equal((await state()).status, 'uncertain');
     assert.equal(await page.evaluate(() => editGrid.addRow()), false); assert.equal(await page.evaluate(() => editGrid.discardChanges()), false); const uncertain = await state();
     await page.screenshot({ path: `${output}/${name}-uncertain.png`, fullPage: true });
-    assert.equal(await save(), true); assert.equal(saves.at(-1).requestId, uncertain.requestId); assert.deepEqual(saves.at(-1).created, saves.at(-2).created); assert.equal(await page.evaluate(() => editGrid.remote.total), initial.total + 1);
+    assert.equal(await save(), true, JSON.stringify(await state())); assert.equal(saves.at(-1).requestId, uncertain.requestId); assert.deepEqual(saves.at(-1).created, saves.at(-2).created); assert.equal(await page.evaluate(() => editGrid.remote.total), initial.total + 1);
     await page.evaluate(() => editGrid.setPage(editGrid.paging.pageCount - 1)); await page.evaluate(() => editGrid.ready); await page.evaluate(() => { editGrid.select({ row: editGrid.view.length - 1, col: 1 }); editGrid.deleteSelectedRows(); }); await save();
     await page.evaluate(() => editGrid.setPage(0)); await page.evaluate(() => editGrid.ready);
     record('Commit followed by lost HTTP response freezes drafts; exact request retry returns persisted receipt without duplicate create');

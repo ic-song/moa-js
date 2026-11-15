@@ -7,7 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const grid = path.join(root, 'packages/grid');
 const readText = async file => (await readFile(file, 'utf8')).replace(/\r\n?/g, '\n');
 const parts = [];
-for (const name of ['formula', 'model', 'data-view', 'clipboard', 'xlsx', 'virtual', 'row-window', 'remote-data', 'remote-changes', 'grid']) parts.push((await readText(path.join(grid, `src/${name}.js`))).replace(/^import .*;\n/gm, ''));
+for (const name of ['formula', 'model', 'data-view', 'clipboard', 'xlsx', 'virtual', 'row-window', 'remote-data', 'remote-changes', 'draft-recovery', 'grid']) parts.push((await readText(path.join(grid, `src/${name}.js`))).replace(/^import .*;\n/gm, ''));
 const source = parts.join('\n');
 const metadata = JSON.parse(await readFile(path.join(grid, 'package.json'), 'utf8'));
 const banner = `/*! Moa JS Grid v${metadata.version} | MIT License | See LICENSE */\n`;

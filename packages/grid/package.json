@@ -1,6 +1,6 @@
 {
   "name": "@moa-js/grid",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "description": "Dependency-free editable data grid with range selection and transactional clipboard operations.",
   "license": "MIT",
@@ -25,5 +25,22 @@
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
     "SHA256SUMS.txt"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ic-song/moa-js.git",
+    "directory": "packages/grid"
+  },
+  "homepage": "https://github.com/ic-song/moa-js#readme",
+  "bugs": {
+    "url": "https://github.com/ic-song/moa-js/issues"
+  },
+  "keywords": [
+    "grid",
+    "datagrid",
+    "javascript",
+    "offline",
+    "spreadsheet",
+    "clipboard"
   ]
 }

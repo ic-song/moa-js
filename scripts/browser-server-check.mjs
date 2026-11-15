@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import path from 'node:path';
+const DEMO_URL = process.env.MOA_DEMO_URL || 'http://127.0.0.1:4173';
 const require = createRequire(import.meta.url), output = path.resolve('output/playwright/server'); await mkdir(output, { recursive: true });
 const sheetExports = {}, sandbox = { module: { exports: sheetExports }, exports: sheetExports, ArrayBuffer, Uint8Array, Date };
 vm.runInNewContext(await readFile('packages/grid/vendor/sheetjs/xlsx.full.min.js', 'utf8'), sandbox); const XLSX = sandbox.module.exports;
@@ -14,12 +15,12 @@ for (const [name, type] of Object.entries({ chromium, firefox, webkit })) {
   const page = await context.newPage(), checks = [], errors = [], requests = [], external = [];
   page.on('pageerror', error => errors.push(error.message)); page.on('request', request => {
     if (request.url().endsWith('/api/grid')) requests.push(JSON.parse(request.postData()));
-    if (/^https?:/.test(request.url()) && !request.url().startsWith('http://127.0.0.1:4173/')) external.push(request.url());
+    if (/^https?:/.test(request.url()) && !request.url().startsWith(`${DEMO_URL}/`)) external.push(request.url());
   });
   const record = text => { checks.push(text); console.log('PASS', name, text); };
   const cell = (row, col) => page.locator(`#server-grid td[data-row="${row}"][data-col="${col}"]`);
   const ready = async () => page.evaluate(() => serverGrid.ready);
-  const reset = async () => { await page.goto('http://127.0.0.1:4173/examples/server/index.html'); assert.equal(await ready(), true); };
+  const reset = async () => { await page.goto(`${DEMO_URL}/examples/server/index.html`); assert.equal(await ready(), true); };
   async function download(scope) {
     await page.getByRole('combobox', { name: '엑셀 다운로드 범위', exact: true }).selectOption(scope);
     const pending = page.waitForEvent('download'); await page.getByRole('button', { name: '엑셀 다운로드', exact: true }).click();
@@ -121,7 +122,7 @@ for (const [name, type] of Object.entries({ chromium, firefox, webkit })) {
     for (const width of [320, 390, 639, 640, 641, 768, 1024, 1440, 1920, 2560]) { await page.setViewportSize({ width, height: 1000 }); await page.waitForTimeout(30); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false); if ([390, 1440].includes(width)) await page.screenshot({ path: path.join(output, `${name}-${width}.png`), fullPage: true }); }
     record('Automated WCAG 2 A/AA and 2.1 AA checks find no violations; the server screen fits ten widths including breakpoint edges');
 
-    await page.goto('http://127.0.0.1:4173/examples/grid/index.html');
+    await page.goto(`${DEMO_URL}/examples/grid/index.html`);
     const localCell = page.locator('td[data-row="0"][data-col="1"]'); const original = await localCell.innerText(); await localCell.click(); await page.keyboard.press('F2'); await page.locator('td input').fill('다중 엔진 입력'); await page.keyboard.press('Enter'); assert.equal(await localCell.innerText(), '다중 엔진 입력');
     await page.keyboard.press('Control+z'); assert.equal(await localCell.innerText(), original); await page.keyboard.press('Control+y'); assert.equal(await localCell.innerText(), '다중 엔진 입력');
     await page.evaluate(() => { grid.select({ row: 0, col: 1 }); grid.select({ row: 1, col: 2 }, true); }); await page.keyboard.press('Delete'); await page.keyboard.press('Control+z');
