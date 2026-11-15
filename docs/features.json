@@ -1014,12 +1014,12 @@
       "category": "QUERY",
       "name": "서버 페이징 연동",
       "phase": "M2",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/paging/paging3"
       ],
-      "acceptance": "호스트 요청 콜백 제공; 그리드 자체 외부 접속 없음"
+      "acceptance": "조회전용 서버 offset/limit/total·검색/정렬/필터·취소/최신응답·재시도·시간초과·페이지보정, 실제HTTP 검증"
     },
     {
       "id": "SUMMARY-001",
@@ -1787,7 +1787,7 @@
       "sources": [
         "https://docs.realgrid.com/tutorial/realgrid-webaccessbility"
       ],
-      "acceptance": "키보드·ARIA·포커스 구현; 스크린리더와 IME 실기기 검증 필요"
+      "acceptance": "키보드·ARIA·상태 안내, 3엔진 서버화면 자동WCAG검사; 네이티브 IME·실제스크린리더 추가수용시험"
     },
     {
       "id": "STYLE-012",
@@ -1947,7 +1947,7 @@
       "status": "partial",
       "evidence": "proposal",
       "sources": [],
-      "acceptance": "단위·Chromium·실제 Excel·10만 행/200열·API 일부 이행·composition 파이프라인 검사; 네이티브 IME·다른 엔진·스크린리더 후속"
+      "acceptance": "단위·기존Chromium·실제Excel·서버HTTP 3엔진·자동WCAG검사; 전체기능 타엔진·네이티브IME·스크린리더는 후속"
     },
     {
       "id": "EXT-012",
@@ -2079,7 +2079,7 @@
       "status": "implemented",
       "evidence": "proposal",
       "sources": [],
-      "acceptance": "로컬 데이터 하단 도달/더보기·종료 상태·가상화 연계·가상/무한/페이징 전환; 서버 요청 제외"
+      "acceptance": "로컬/서버 무한 스크롤·하단/더보기·중복요청/행키 보호·재시도/종료·가상화·표시방식 전환; 서버 저장 별도"
     }
   ]
 }

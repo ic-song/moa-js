@@ -1,6 +1,6 @@
 # RealGrid 참고 기능과 현재 구현의 차이
 
-기준: Moa Grid 0.3.0 / 2026-11-15. **기능 범주와 조작 목적을 맞춘 독립 구현**이며 RealGrid 실행본과의 자동 대조 시험이나 전체 API 호환 인증은 하지 않았습니다. 기존 RealGrid JS 파일만 교체해서 기존 코드를 그대로 실행할 수 있는 상태는 아닙니다.
+기준: Moa Grid 0.5.0 / 2026-11-15. **기능 범주와 조작 목적을 맞춘 독립 구현**이며 RealGrid 실행본과의 자동 대조 시험이나 전체 API 호환 인증은 하지 않았습니다. 기존 RealGrid JS 파일만 교체해서 기존 코드를 그대로 실행할 수 있는 상태는 아닙니다.
 
 | 범주 | 현재 Moa 구현 | 주요 차이·후속 범위 | 공식 참고 |
 | --- | --- | --- | --- |
@@ -25,3 +25,5 @@
 0.3.0의 [공개 API 일부 이행 지원표](realgrid-api-subset.md)는 지원 메서드·인수와 미지원 오류를 정의합니다. 수식은 [독립 확장 API](grid-advanced.md)이며 RealGrid의 계산 필드/엑셀 수식 설정과 동일한 API가 아닙니다.
 
 0.4.0은 자체 dataMode API로 가상/로컬 무한/로컬 페이징 전환과 Excel 범위 다운로드를 제공합니다. RealGrid setPaging API나 서버 요청을 구현한 것은 아닙니다. [자체 API](data-modes.md)를 확인하세요.
+
+0.5.0의 [dataSource 계약](server-data.md)은 자체 서버 paging/infinite와 전체 Excel을 제공합니다. RealGrid setPaging/행 편집 버퍼/저장 API의 교체 호환을 제공한 것은 아닙니다.

@@ -68,3 +68,7 @@ Chromium CDP의 composition 입력 파이프라인으로 한글·Enter·Tab·Und
 ## 0.4 표시 방식과 엑셀 다운로드
 
 로컬 페이징·무한 스크롤과 Excel 범위 선택은 [표시 방식 API](data-modes.md)에 정리했습니다. 이전 절의 전체 결과 기본 동작은 virtual 모드에 해당합니다.
+
+## 0.5 서버 데이터
+
+서버 pagination/infinite는 [별도 데이터 소스 계약](server-data.md)으로 연결합니다. 이 문서의 자유 A1 수식·로컬 그룹/트리·직접 편집 규칙은 로컬 데이터 모드에 해당합니다.

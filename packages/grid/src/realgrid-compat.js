@@ -162,7 +162,7 @@ export class GridView {
   destroy() { this.grid?.destroy(); this.grid = null; this.provider?.views.delete(this); this.provider = null; this.destroyed = true; }
 }
 
-export const compatibility = Object.freeze({ version: '0.4.0', baseline: 'RealGrid2 public API subset', fullCompatibility: false });
+export const compatibility = Object.freeze({ version: '0.5.0', baseline: 'RealGrid2 public API subset', fullCompatibility: false });
 
 // Common unsupported entry points fail by name instead of pretending to apply them.
 for (const method of ['setOptions', 'setDisplayOptions', 'setCheckBar', 'setStateBar', 'setColumnLayout', 'setColumnFilters', 'setValidations', 'setPaging', 'groupBy', 'exportGrid']) GridView.prototype[method] = function () { throw new UnsupportedFeatureError(method); };

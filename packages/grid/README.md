@@ -59,7 +59,7 @@
 
 | API | 동작 |
 | --- | --- |
-| `getData({raw=false})` | 전체 행 컨테이너의 얕은 복사. 수식 모드는 기본 계산값, raw:true는 원문 |
+| `getData({raw=false})` | 로컬 전체/서버 읽어온 행의 얕은 복사. 수식 모드는 기본 계산값, raw:true는 원문 |
 | `setData(rows)` | 데이터 교체·이력·선택 초기화. 현재 필터·정렬·모드는 유지하며 트리 관계를 검증 |
 | `setSearch(text)` | 전체 열 문자열 검색; 진행 중 편집은 취소 |
 | `getSelection()` | 표시 좌표의 선택 범위. 병합과 겹치면 병합 범위까지 확장 |
@@ -127,3 +127,7 @@ XLSX 기본 내보내기는 현재 표시 행만 포함합니다. 접힌 그룹�
 ## 0.4 표시 방식과 다운로드
 
 `dataMode: "virtual" | "infinite" | "pagination"`, `pageSize`와 `setDataMode`, `setPage`, `setPageSize`, `loadMore`, `getPagingState`를 제공합니다. 엑셀 다운로드 scope는 view/filtered/all/selection입니다. [사용 예제·범위·제약](../../docs/data-modes.md)을 확인하세요.
+
+## 0.5 서버 데이터
+
+`dataSource: {load,rowKey,timeoutMs,exportRows}`로 서버 pagination/infinite를 연결합니다. `await grid.ready`, `reload()`, `retryLoad()`를 제공하고 페이지/추가 요청은 Promise<boolean>을 반환합니다. 서버 검색·정렬·필터와 실패/취소/재시도를 지원하며 서버 데이터는 조회 전용입니다. [실행 예제·요청/응답·전체 Excel·제약](../../docs/server-data.md)을 확인하세요.

@@ -128,7 +128,7 @@ try {
   });
   await cdp.send('Input.imeSetComposition', { text: 'ㅎ', selectionStart: 1, selectionEnd: 1 });
   await cdp.send('Input.imeSetComposition', { text: '한글', selectionStart: 2, selectionEnd: 2 });
-  await page.evaluate(() => { workbench.editor.input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })); workbench.editor.input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', isComposing: true, bubbles: true, cancelable: true })); });
+  await page.evaluate(() => { workbench.editor.input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })); workbench.editor.input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true })); workbench.editor.input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', isComposing: true, bubbles: true, cancelable: true })); });
   assert.equal(await page.evaluate(() => workbench.editor.input === window.imeInput), true); assert.equal(await page.evaluate(() => workbench.getData()[0].name), '키보드');
   await cdp.send('Input.insertText', { text: '한글' }); await page.waitForTimeout(50); await input.press('Enter');
   assert.equal(await cell(0, 0).innerText(), '한글'); assert.ok(await page.evaluate(() => imeEvents.some(event => event.type === 'compositionend')));

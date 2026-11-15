@@ -20,9 +20,9 @@
 
 | 상태 | 항목 수 |
 | --- | ---: |
-| 초기 구현 | 48 |
+| 초기 구현 | 49 |
 | 일부 구현 | 17 |
-| 계획 | 106 |
+| 계획 | 105 |
 
 중요한 구분과 구현 순서는 [로드맵](roadmap.md), 사용자 지정 단축키는 [셀 조작 계약](grid-interaction-contract.md)을 참고한다.
 
@@ -129,7 +129,7 @@
 | QUERY-007 | 전체 문자열 검색 | M0 | 초기 구현 | 현재 구현은 전체 열 포함 검색; RealGrid 검색 API와는 별도 | [목차 확인](https://docs.realgrid.com/guides/data-manager/search-item) |
 | QUERY-008 | 셀 검색·다음 결과 이동 | M1 | 계획 | 대소문자·부분일치·역방향·순환 검색 | [목차 확인](https://docs.realgrid.com/guides/data-manager/search-item) |
 | QUERY-009 | 로컬 페이징 | M1 | 초기 구현 | 로컬 표시행 페이징·페이지 크기/번호 이동·원본 매핑·마지막 페이지 삭제 보정·선택/Undo 검증 | [목차 확인](https://docs.realgrid.com/guides/paging/paging1) |
-| QUERY-010 | 서버 페이징 연동 | M2 | 계획 | 호스트 요청 콜백 제공; 그리드 자체 외부 접속 없음 | [목차 확인](https://docs.realgrid.com/guides/paging/paging3) |
+| QUERY-010 | 서버 페이징 연동 | M2 | 초기 구현 | 조회전용 서버 offset/limit/total·검색/정렬/필터·취소/최신응답·재시도·시간초과·페이지보정, 실제HTTP 검증 | [목차 확인](https://docs.realgrid.com/guides/paging/paging3) |
 
 ## 헤더·푸터·그룹·집계
 
@@ -218,7 +218,7 @@
 | STYLE-008 | 이벤트 순서 | M1 | 일부 구현 | 현재 onChange·onSelectionChange 제공; 취소·사전 이벤트 정리 필요 | [목차 확인](https://docs.realgrid.com/guides/events/event-order) |
 | STYLE-009 | 클릭·렌더 완료 이벤트 | M1 | 계획 | 데이터 좌표와 화면 좌표 구분 | [목차 확인](https://docs.realgrid.com/guides/events/click-event) |
 | STYLE-010 | 복수 그리드 스크롤 동기화 | M3 | 계획 | 재귀 이벤트와 서로 다른 행 높이 처리 | [목차 확인](https://docs.realgrid.com/guides/events/scroll-event) |
-| STYLE-011 | 접근성 | M0 | 일부 구현 | 키보드·ARIA·포커스 구현; 스크린리더와 IME 실기기 검증 필요 | [본문 검토](https://docs.realgrid.com/tutorial/realgrid-webaccessbility) |
+| STYLE-011 | 접근성 | M0 | 일부 구현 | 키보드·ARIA·상태 안내, 3엔진 서버화면 자동WCAG검사; 네이티브 IME·실제스크린리더 추가수용시험 | [본문 검토](https://docs.realgrid.com/tutorial/realgrid-webaccessbility) |
 | STYLE-012 | 대량 데이터 성능 | M2 | 일부 구현 | 10만 행×12열 및 1천 행×200열 Chromium 실측·가상 DOM 수 검사; 전체 메모리·다른 엔진·서버 공급 후속 | [본문 검토](https://docs.realgrid.com/guides/performance/large-data-load-test) |
 | STYLE-013 | React 연동 | M2 | 계획 | 마운트·갱신·언마운트와 StrictMode 해제 계약 | [목차 확인](https://docs.realgrid.com/tutorial/react-tutorial/on-initialized) |
 | STYLE-014 | Vue 연동 | M2 | 계획 | 반응형 데이터 갱신과 언마운트 해제 계약 | [목차 확인](https://docs.realgrid.com/tutorial/vue-tutorial/on-initialized) |
@@ -238,13 +238,13 @@
 | EXT-008 | 엑셀식 수식 엔진 | M3 | 일부 구현 | opt-in A1/$ 참조·범위·산술·비교·13개 함수·오류·Undo/Redo·XLSX; 주소 구조 자동 재작성·전체 Excel 문법 제외 | 자체 요구 |
 | EXT-009 | TypeScript 타입 선언 | M1 | 계획 | 공개 옵션·이벤트·좌표·변경 레코드의 타입 계약 | 자체 요구 |
 | EXT-010 | 오프라인 배포 검증 | M1 | 초기 구현 | 배포 파일 SHA256SUMS·선택 의존성 라이선스·로컬 동봉·망 차단 검증 | 자체 요구 |
-| EXT-011 | 성능·호환 회귀 스위트 | M1 | 일부 구현 | 단위·Chromium·실제 Excel·10만 행/200열·API 일부 이행·composition 파이프라인 검사; 네이티브 IME·다른 엔진·스크린리더 후속 | 자체 요구 |
+| EXT-011 | 성능·호환 회귀 스위트 | M1 | 일부 구현 | 단위·기존Chromium·실제Excel·서버HTTP 3엔진·자동WCAG검사; 전체기능 타엔진·네이티브IME·스크린리더는 후속 | 자체 요구 |
 | EXT-012 | 패키지별 배포·독립 사용 | M0 | 일부 구현 | 현재 grid JS·CSS 독립 제공; npm 등록과 향후 모듈은 미실행 | 자체 요구 |
 | EXT-013 | 폼·트리·다이얼로그 독립 모듈 | M3 | 계획 | 그리드 공통 코드의 실제 재사용 근거가 생길 때 패키지 분리 | 자체 요구 |
 | EXT-014 | 붙여넣기 자동 행 확장 | M0 | 초기 구현 | 일반 무필터 모드에서 빈 표·마지막 행 이후 붙여넣기를 한 번에 적용·Undo/Redo | 자체 요구 |
 | EXT-015 | 행·파일 단위 변경 이력 | M1 | 초기 구현 | 행 추가·삭제·XLSX 데이터 교체를 단일 트랜잭션으로 되돌리기·다시 실행 | 자체 요구 |
 | EXT-016 | 수동 사각형 셀 병합 | M2 | 초기 구현 | 일반 모드에서 가로·세로 병합·해제; 숨겨진 데이터 보존과 붙여넣기 차단 | 자체 요구 |
-| EXT-017 | 무한 스크롤·표시 방식 선택 | M1 | 초기 구현 | 로컬 데이터 하단 도달/더보기·종료 상태·가상화 연계·가상/무한/페이징 전환; 서버 요청 제외 | 자체 요구 |
+| EXT-017 | 무한 스크롤·표시 방식 선택 | M1 | 초기 구현 | 로컬/서버 무한 스크롤·하단/더보기·중복요청/행키 보호·재시도/종료·가상화·표시방식 전환; 서버 저장 별도 | 자체 요구 |
 
 ## 별도 제품·연동 후보
 

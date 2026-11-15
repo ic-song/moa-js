@@ -2,12 +2,14 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { handleDemoAPI } from './demo-api.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, 'http://localhost');
+    if (await handleDemoAPI(request, response, url)) return;
     const relative = decodeURIComponent(url.pathname === '/' ? '/examples/grid/index.html' : url.pathname);
     const target = path.resolve(root, '.' + relative);
     const local = path.relative(root, target);

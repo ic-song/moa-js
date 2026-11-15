@@ -1,4 +1,4 @@
-/*! Moa JS Grid v0.4.0 | MIT License | See LICENSE */
+/*! Moa JS Grid v0.5.0 | MIT License | See LICENSE */
 (function () {
 'use strict';
 // A bounded expression parser. No JavaScript evaluation or property access.
@@ -590,6 +590,90 @@ function rowWindow(result, { mode = 'virtual', pageSize = 100, pageIndex = 0, lo
   return { view, display, state: { mode, pageSize, pageIndex, pageCount, total, totalRows: result.view.length, start, end, loaded: end, hasMore: end < total } };
 }
 
+// The host supplies transport/authentication; the core never chooses a network URL.
+function withRequestTimeout(load, controller, timeoutMs) {
+  const aborted = new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(controller.signal.reason || Error('요청 취소')), { once: true }));
+  const timer = setTimeout(() => controller.abort(Object.assign(Error('서버 응답 시간이 초과됐습니다. 다시 시도하세요.'), { name: 'TimeoutError' })), timeoutMs);
+  const pending = Promise.resolve().then(() => { if (controller.signal.aborted) throw controller.signal.reason; return load(); });
+  return Promise.race([pending, aborted]).finally(() => clearTimeout(timer));
+}
+
+class RemoteData {
+  constructor(source, { onChange = () => {}, convertRow = row => ({ ...row }) } = {}) {
+    if (!source || typeof source.load !== 'function') throw new Error('dataSource.load 함수가 필요합니다.');
+    if (source.exportRows != null && typeof source.exportRows !== 'function') throw new Error('dataSource.exportRows는 함수여야 합니다.');
+    this.source = source; this.rowKey = source.rowKey ?? 'id';
+    if (typeof this.rowKey !== 'string' || !this.rowKey || ['__proto__', 'constructor', 'prototype'].includes(this.rowKey)) throw new Error('안전한 rowKey가 필요합니다.');
+    this.timeoutMs = source.timeoutMs ?? 30000;
+    if (!Number.isInteger(this.timeoutMs) || this.timeoutMs < 1 || this.timeoutMs > 300000) throw new Error('timeoutMs는 1~300,000 정수여야 합니다.');
+    this.onChange = onChange; this.convertRow = convertRow; this.rows = []; this.total = null; this.offset = 0;
+    this.loading = false; this.error = null; this.sequence = 0; this.disposed = false; this.promise = Promise.resolve(false);
+  }
+  configure(criteria, mode, pageSize) {
+    if (!['pagination', 'infinite'].includes(mode)) throw new Error('서버 데이터는 pagination 또는 infinite 모드로 사용하세요.');
+    const snapshot = JSON.parse(JSON.stringify(criteria)), key = JSON.stringify([snapshot, mode, pageSize]);
+    if (key === this.queryKey) return this.promise;
+    this.criteria = snapshot; this.mode = mode; this.pageSize = pageSize; this.queryKey = key;
+    return this.request(0, { reset: true });
+  }
+  validateRows(rows, previous = []) {
+    if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== 'object' || Array.isArray(row))) throw new Error('서버 rows는 행 객체 배열이어야 합니다.');
+    const ids = new Set(previous.map(row => String(row[this.rowKey])));
+    return rows.map(row => {
+      const id = row[this.rowKey];
+      if (!['string', 'number'].includes(typeof id) || id === '' || typeof id === 'number' && !Number.isFinite(id)) throw new Error(`서버 행에 고유 ${this.rowKey} 값이 필요합니다.`);
+      const item = this.convertRow(row), key = item[this.rowKey];
+      if (!['string', 'number'].includes(typeof key) || key === '' || typeof key === 'number' && !Number.isFinite(key)) throw new Error('변환한 서버 행의 고유 키가 올바르지 않습니다.');
+      if (ids.has(String(key))) throw new Error(`서버 행 키가 중복됩니다: ${key}`);
+      ids.add(String(key)); return item;
+    });
+  }
+  request(offset, { append = false, reset = false, redirected = false } = {}) {
+    if (this.disposed) return Promise.resolve(false);
+    const key = `${this.queryKey}:${offset}:${append}`;
+    if (this.loading && this.pendingKey === key) return this.promise;
+    this.controller?.abort(); const controller = new AbortController(), sequence = ++this.sequence;
+    this.controller = controller; this.pendingKey = key; this.loading = true; this.error = null;
+    if (reset) { this.rows = []; this.total = null; this.offset = 0; }
+    const request = { ...JSON.parse(JSON.stringify(this.criteria)), offset, limit: this.pageSize, pageIndex: Math.floor(offset / this.pageSize), signal: controller.signal };
+    this.lastRequest = { offset, append, reset, redirected };
+    this.promise = withRequestTimeout(() => this.source.load(request), controller, this.timeoutMs).then(async result => {
+      if (this.disposed || sequence !== this.sequence) return false;
+      if (!result || !Number.isSafeInteger(result.total) || result.total < 0 || !Array.isArray(result.rows)) throw new Error('서버 응답은 {rows, total: 0 이상의 안전한 정수}여야 합니다.');
+      if (!append && result.total > 0 && offset >= result.total && !redirected) {
+        this.loading = false;
+        return this.request(Math.floor((result.total - 1) / this.pageSize) * this.pageSize, { redirected: true });
+      }
+      if (!append && result.total > 0 && offset >= result.total) throw new Error('서버 목록이 계속 변경되고 있습니다. 새로고침 후 다시 시도하세요.');
+      const expected = Math.max(0, Math.min(this.pageSize, result.total - offset));
+      if (result.rows.length !== expected) throw new Error('서버 rows 길이와 total/offset/limit이 일치하지 않습니다.');
+      if (append && (offset !== this.rows.length || result.total < offset)) throw new Error('서버 목록이 변경됐습니다. 새로고침 후 다시 불러오세요.');
+      const rows = this.validateRows(result.rows, append ? this.rows : []);
+      this.rows = append ? [...this.rows, ...rows] : rows; this.total = result.total; this.offset = append ? 0 : offset;
+      return true;
+    }).catch(error => {
+      if (this.disposed || sequence !== this.sequence || controller.signal.aborted && controller.signal.reason?.name !== 'TimeoutError') return false;
+      this.error = error instanceof Error ? error.message : String(error); return false;
+    }).finally(() => {
+      if (this.disposed || sequence !== this.sequence) return;
+      this.loading = false; this.pendingKey = null; this.onChange();
+    });
+    this.onChange(); return this.promise;
+  }
+  page(index) {
+    if (!Number.isInteger(index) || index < 0 || this.total == null || index >= Math.ceil(this.total / this.pageSize)) return Promise.resolve(false);
+    return this.request(index * this.pageSize);
+  }
+  more() {
+    if (this.loading) return this.promise;
+    if (this.error || this.total == null || this.rows.length >= this.total) return Promise.resolve(false);
+    return this.request(this.rows.length, { append: true });
+  }
+  retry() { return this.lastRequest ? this.request(this.lastRequest.offset, { ...this.lastRequest, redirected: false }) : Promise.resolve(false); }
+  reload() { return this.request(this.mode === 'pagination' ? this.offset : 0, { reset: this.mode !== 'pagination' }); }
+  dispose() { this.disposed = true; this.sequence++; this.controller?.abort(); }
+}
+
 
 let gridSequence = 0;
 
@@ -605,10 +689,13 @@ class Grid {
     this.host = typeof target === 'string' ? document.querySelector(target) : target;
     if (!this.host || this.host.childNodes.length) throw new Error('비어 있는 그리드 컨테이너가 필요합니다.');
     this.options = options;
-    this.model = options.model || new GridModel(options.columns, options.data || [], options);
+    if (options.dataSource && (options.model || options.data?.length || options.formulas || options.tree || options.groupBy?.length)) throw new Error('서버 데이터는 공유 모델·초기 데이터·A1 수식·그룹·트리와 함께 사용하지 않습니다.');
+    this.model = options.model || new GridModel(options.columns, options.data || [], { ...options, editable: options.dataSource ? false : options.editable });
+    if (options.dataSource) this.remote = new RemoteData(options.dataSource, { onChange: () => this.renderRemote(), convertRow: row => { const item = { ...row }; for (const column of this.columns) item[column.field] = this.model.convert(column, row[column.field]); return item; } });
     this.columns = options.model ? options.columns.map(column => ({ ...column })) : this.model.columns;
     this.virtual = options.virtual !== false; this.rowHeight = 48;
-    this.dataMode = options.dataMode || 'virtual';
+    this.dataMode = options.dataMode || (this.remote ? 'pagination' : 'virtual');
+    if (this.remote && this.dataMode === 'virtual') throw new Error('서버 데이터는 pagination 또는 infinite 모드로 사용하세요.');
     if (!DATA_MODES.includes(this.dataMode)) throw new Error('올바른 dataMode가 필요합니다.');
     this.pageSize = validatePageSize(options.pageSize ?? 100); this.pageIndex = 0; this.loadedLimit = this.pageSize;
     this.anchor = { row: 0, col: 0 }; this.current = { ...this.anchor };
@@ -623,7 +710,7 @@ class Grid {
     this.toolbar = node('div', null, 'moa-grid__toolbar');
     const searchLabel = node('label', '검색 ', 'moa-grid__search');
     this.search = node('input'); this.search.type = 'search'; this.search.placeholder = '전체 데이터 검색';
-    this.search.addEventListener('input', () => { this.query = this.search.value; this.merges = []; this.resetSelection(); this.render(); }, { signal });
+    this.search.addEventListener('input', () => { clearTimeout(this.searchTimer); if (this.remote) this.searchTimer = setTimeout(() => { if (!this.destroyed) this.setSearch(this.search.value); }, 200); else { this.query = this.search.value; this.merges = []; this.resetSelection(); this.render(); } }, { signal });
     searchLabel.append(this.search);
     const button = (text, action) => {
       const control = node('button', text); control.type = 'button';
@@ -632,12 +719,12 @@ class Grid {
     this.toolbar.append(searchLabel);
     this.undoButton = button('되돌리기', () => this.undo());
     this.redoButton = button('다시 실행', () => this.redo());
-    button('선택 지우기', () => this.clearSelection());
+    this.clearButton = button('선택 지우기', () => this.clearSelection());
     this.addButton = button('행 추가', () => this.addRow());
     this.removeButton = button('선택 행 삭제', () => this.deleteSelectedRows());
     this.filterButton = button('필터', () => { this.filterPanel.hidden = !this.filterPanel.hidden; this.filterButton.setAttribute('aria-expanded', String(!this.filterPanel.hidden)); });
     this.filterButton.setAttribute('aria-expanded', 'false');
-    button('셀 병합', () => this.mergeSelection()); button('병합 해제', () => this.unmergeSelection());
+    this.mergeButton = button('셀 병합', () => this.mergeSelection()); this.unmergeButton = button('병합 해제', () => this.unmergeSelection());
     button('CSV 내보내기', () => this.downloadCSV());
     this.fileInput = node('input'); this.fileInput.type = 'file'; this.fileInput.accept = '.xlsx'; this.fileInput.hidden = true;
     this.fileInput.addEventListener('change', async () => { const file = this.fileInput.files[0]; if (file) await this.importXLSX(file); this.fileInput.value = ''; }, { signal });
@@ -669,7 +756,15 @@ class Grid {
     this.status = node('div', '', 'moa-grid__status'); this.status.setAttribute('role', 'status'); this.status.setAttribute('aria-live', 'polite');
     this.status.id = `moa-grid-status-${++gridSequence}`;
     this.navigation = this.createNavigation();
-    this.root.append(this.toolbar, this.filterPanel, this.viewport, this.navigation, this.status, this.fileInput); this.host.append(this.root);
+    this.loadState = node('div', null, 'moa-grid__load-state'); this.loadState.hidden = true;
+    this.loadText = node('span'); this.loadText.setAttribute('role', 'status'); this.loadText.setAttribute('aria-live', 'polite');
+    this.retryButton = node('button', '다시 시도'); this.retryButton.type = 'button'; this.retryButton.hidden = true;
+    this.retryButton.addEventListener('click', () => this.retryLoad(), { signal });
+    this.reloadButton = node('button', '서버 새로고침'); this.reloadButton.type = 'button'; this.reloadButton.addEventListener('click', () => this.reload(), { signal });
+    this.loadState.append(this.loadText, this.retryButton, this.reloadButton);
+    this.root.append(this.toolbar, this.filterPanel, this.loadState, this.viewport, this.navigation, this.status, this.fileInput);
+    if (this.remote) { this.modeSelect.querySelector('[value=virtual]').disabled = true; this.groupSelect.disabled = true; }
+ this.host.append(this.root);
     this.table.addEventListener('keydown', event => this.onKey(event), { signal });
     this.table.addEventListener('dblclick', event => { const cell = this.cellAt(event.target); if (cell) this.startEdit(cell); }, { signal });
     this.table.addEventListener('beforeinput', event => {
@@ -745,6 +840,49 @@ class Grid {
 
   get editable() { return this.model.editable && this.options.editable !== false; }
 
+  renderRemote() {
+    if (this.destroyed) return;
+    if (this.remoteRows !== this.remote.rows) {
+      const append = this.remote.lastRequest?.append && this.remote.rows.length >= this.model.rows.length;
+      this.remoteRows = this.remote.rows; this.mutateModel('setData', this.remote.rows); this.dataRevision++;
+      this.merges = []; if (!append) this.resetSelection();
+    }
+    // Ordering and filtering were already applied to the complete dataset by the server.
+    this.fullResult = buildDisplay(this.model.rows, { columns: this.columns }); this.applyRowWindow();
+  }
+  updateRemoteControls() {
+    const { loading, error, total, lastRequest } = this.remote;
+    this.loadState.hidden = false; this.loadState.classList.toggle('is-error', !!error);
+    this.table.setAttribute('aria-busy', String(loading));
+    this.loadText.textContent = loading ? `${this.dataMode === 'pagination' ? (Math.floor(lastRequest.offset / this.pageSize) + 1) + '페이지 ' : ''}서버 데이터를 불러오는 중…` : error ? `불러오기 실패: ${error}` : this.exportRequest ? '서버 Excel 데이터를 준비하는 중…' : `서버 연결 · ${total ?? 0}행 · 읽기 전용`;
+    this.retryButton.hidden = !error; this.retryButton.disabled = loading; this.reloadButton.disabled = loading;
+    for (const scope of ['filtered', 'all']) this.exportScope.querySelector(`[value=${scope}]`).disabled = !this.remote.source.exportRows;
+    if (this.exportScope.selectedOptions[0]?.disabled) this.exportScope.value = 'view';
+    this.exportButton.disabled = !this.xlsx || loading || !!this.exportRequest;
+  }
+  retryLoad() { return this.remote ? this.ready = this.remote.retry() : Promise.resolve(false); }
+  reload() {
+    if (!this.remote) { this.render(); return Promise.resolve(true); }
+    this.exportRequest?.abort(); return this.ready = this.remote.reload();
+  }
+  async exportRemoteXLSX({ fileName, scope, sheetName, formulas }) {
+    if (!this.remote.source.exportRows) { this.message('서버 전체 다운로드용 dataSource.exportRows를 연결하세요.', true); return false; }
+    if (formulas || this.exportRequest) return false;
+    const controller = new AbortController(), queryKey = this.remote.queryKey;
+    this.exportRequest = controller; this.updateRemoteControls();
+    try {
+      const criteria = scope === 'all' ? { query: '', sorts: [], filters: [], filterLogic: 'and' } : JSON.parse(JSON.stringify(this.remote.criteria));
+      const data = await withRequestTimeout(() => this.remote.source.exportRows({ ...criteria, scope, signal: controller.signal }), controller, this.remote.timeoutMs);
+      if (this.destroyed || controller.signal.aborted || queryKey !== this.remote.queryKey) return false;
+      if (!Array.isArray(data) || data.length * this.columns.length > 1000000) throw new Error('서버 Excel 결과는 행 배열이며 최대 100만 셀이어야 합니다. 더 큰 파일은 서버에서 생성하세요.');
+      const rows = this.remote.validateRows(data);
+      const bytes = writeXLSX(rows, this.xlsx, this.columns, { sheetName });
+      this.downloadFile(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileName);
+      this.message(`${rows.length}행 서버 결과 XLSX 다운로드 완료`); return true;
+    } catch (error) { if (!this.destroyed && (!controller.signal.aborted || controller.signal.reason?.name === 'TimeoutError')) this.message(error.message, true); return false; }
+    finally { this.exportRequest = null; if (!this.destroyed) this.updateRemoteControls(); }
+  }
+
   createNavigation() {
     const region = node('div', null, 'moa-grid__navigation'); region.setAttribute('role', 'group'); region.setAttribute('aria-label', '데이터 탐색');
     const label = node('label', '표시 행 수 ', 'moa-grid__option'); this.sizeSelect = node('select'); this.sizeSelect.setAttribute('aria-label', '표시 행 수');
@@ -766,39 +904,47 @@ class Grid {
   updateNavigation() {
     const state = this.paging; this.modeSelect.value = this.dataMode; this.sizeSelect.value = this.pageSize;
     this.navigation.hidden = this.dataMode === 'virtual'; this.pageControls.hidden = this.dataMode !== 'pagination'; this.moreButton.hidden = this.dataMode !== 'infinite';
-    this.moreButton.disabled = !state.hasMore; this.moreButton.textContent = state.hasMore ? '더 불러오기' : '모두 불러왔습니다';
+    this.moreButton.disabled = !state.hasMore || !!this.remote?.loading || !!this.remote?.error; this.moreButton.textContent = this.remote?.loading ? '불러오는 중…' : state.hasMore ? '더 불러오기' : '모두 불러왔습니다';
     this.firstPage.disabled = this.previousPage.disabled = !state.total || !this.pageIndex;
     this.nextPage.disabled = this.lastPage.disabled = !state.total || this.pageIndex >= state.pageCount - 1;
     this.pageInput.value = state.total ? this.pageIndex + 1 : 1; this.pageInput.max = Math.max(1, state.pageCount); this.pageInput.disabled = !state.total;
     const prefix = this.dataMode === 'pagination' ? `${state.total ? this.pageIndex + 1 : 0} / ${state.pageCount}페이지 · ` : '';
     this.pageSummary.textContent = `${prefix}${state.total ? state.start + 1 : 0}–${state.end} / ${state.total} 표시 행`;
+    if (this.remote) this.updateRemoteControls();
     this.exportScope.querySelector('[value=view]').textContent = this.dataMode === 'pagination' ? '현재 페이지' : this.dataMode === 'infinite' ? '불러온 행' : '현재 표시 행';
   }
 
   setDataMode(mode) {
-    if (!DATA_MODES.includes(mode)) throw new Error('표시 방식은 virtual, infinite, pagination 중 선택하세요.');
+    if (!DATA_MODES.includes(mode) || this.remote && mode === 'virtual') throw new Error('서버는 infinite/pagination, 로컬은 virtual/infinite/pagination을 사용하세요.');
     if (this.editor && !this.finishEdit()) { this.modeSelect.value = this.dataMode; return false; }
-    this.dataMode = mode; this.resetRowWindow(); this.merges = []; this.resetSelection(); this.applyRowWindow();
+    this.dataMode = mode; this.resetRowWindow(); this.merges = []; this.resetSelection();
+    if (this.remote) { this.render(); return this.ready = this.ready.then(ok => { if (ok && !this.destroyed) this.options.onDataModeChange?.(this.getPagingState()); return ok; }); }
+    this.applyRowWindow();
     this.options.onDataModeChange?.(this.getPagingState()); return true;
   }
   setPageSize(size) {
     validatePageSize(size);
     if (this.editor && !this.finishEdit()) { this.sizeSelect.value = this.pageSize; return false; }
     if (![...this.sizeSelect.options].some(option => Number(option.value) === size)) { const option = node('option', String(size)); option.value = size; this.sizeSelect.append(option); }
-    this.pageSize = size; this.resetRowWindow(); this.merges = []; this.resetSelection(); this.applyRowWindow(); return true;
+    this.pageSize = size; this.resetRowWindow(); this.merges = []; this.resetSelection();
+    if (this.remote) { this.render(); return this.ready; }
+    this.applyRowWindow(); return true;
   }
   setPage(index) {
     if (this.dataMode !== 'pagination') throw new Error('페이지 이동은 페이징 모드에서 사용하세요.');
     if (!Number.isInteger(index) || index < 0 || index >= this.paging.pageCount) { this.pageInput.value = this.pageIndex + 1; this.message('이동할 페이지 범위를 확인하세요.', true); return false; }
     if (this.editor && !this.finishEdit()) return false;
+    if (this.remote) return this.ready = this.remote.page(index).then(ok => { if (ok && !this.destroyed) { this.viewport.scrollTop = 0; this.resetSelection(); this.renderViewport(); this.options.onPageChange?.(this.getPagingState()); } return ok; });
     this.pageIndex = index; this.viewport.scrollTop = 0; this.merges = []; this.resetSelection(); this.applyRowWindow();
     this.options.onPageChange?.(this.getPagingState()); return true;
   }
   loadMore() {
+    if (this.remote && this.dataMode === 'infinite') return this.ready = this.remote.more();
     if (this.dataMode !== 'infinite' || !this.paging.hasMore || this.editor) return false;
     this.loadedLimit = this.paging.end + this.pageSize; this.merges = []; this.applyRowWindow(); return true;
   }
   maybeLoadMore() {
+    if (this.remote && (this.remote.loading || this.remote.error || !this.paging.hasMore)) return false;
     if (this.dataMode !== 'infinite' || this.viewport.clientHeight <= 0 || this.viewport.scrollTop + this.viewport.clientHeight < this.viewport.scrollHeight - this.rowHeight * 2) return false;
     return this.loadMore();
   }
@@ -883,6 +1029,13 @@ class Grid {
   }
 
   render() {
+    if (this.remote) {
+      const previousKey = this.remote.queryKey;
+      this.ready = this.remote.configure({ query: this.query, sorts: this.sorts, filters: this.filters, filterLogic: this.filterLogic }, this.dataMode, this.pageSize);
+      if (previousKey !== this.remote.queryKey) { this.exportRequest?.abort(); this.viewport.scrollTop = 0; this.resetSelection(); }
+      else this.renderRemote();
+      return this.ready;
+    }
     const signature = JSON.stringify([this.query, this.filters, this.filterLogic, this.sorts, this.groupBy, this.tree, [...this.collapsedGroups], [...this.collapsedNodes]]);
     if (this.viewSignature != null && this.viewSignature !== signature) this.resetRowWindow();
     this.viewSignature = signature;
@@ -891,7 +1044,12 @@ class Grid {
   }
 
   applyRowWindow() {
-    const result = rowWindow(this.fullResult, { mode: this.dataMode, pageSize: this.pageSize, pageIndex: this.pageIndex, loaded: this.loadedLimit });
+    const result = rowWindow(this.fullResult, { mode: this.remote ? 'virtual' : this.dataMode, pageSize: this.pageSize, pageIndex: this.pageIndex, loaded: this.loadedLimit });
+    if (this.remote) {
+      const offset = this.dataMode === 'pagination' ? this.remote.offset : 0, total = this.remote.total ?? 0;
+      for (const item of result.view) item.position += offset;
+      result.state = { mode: this.dataMode, pageSize: this.pageSize, pageIndex: Math.floor(offset / this.pageSize), pageCount: Math.ceil(total / this.pageSize), total, totalRows: total, start: offset, end: offset + result.view.length, loaded: result.view.length, hasMore: offset + result.view.length < total, loading: this.remote.loading, error: this.remote.error };
+    }
     this.view = result.view; this.display = result.display; this.paging = result.state; this.pageIndex = result.state.pageIndex;
     this.virtualRows = this.virtual && this.display.length > 200; this.virtualCols = this.virtual && this.columns.length > 30;
     this.virtualActive = this.virtualRows || this.virtualCols;
@@ -916,8 +1074,9 @@ class Grid {
     const colgroup = node('colgroup'); colgroup.append(node('col'));
     for (const slot of slots) { const col = node('col'); col.style.width = `${slot.width}px`; if (!slot.gap) col.dataset.field = this.columns[slot.col].field; colgroup.append(col); }
     this.table.append(colgroup);
-    this.table.setAttribute('aria-rowcount', String(this.display.length + 1)); this.table.setAttribute('aria-colcount', String(this.columns.length + 1));
+    this.table.setAttribute('aria-rowcount', String(this.remote ? this.remote.total == null ? -1 : this.remote.total + 1 : this.display.length + 1)); this.table.setAttribute('aria-colcount', String(this.columns.length + 1));
     const head = node('thead'), heading = node('tr'), corner = node('th', '#'); corner.scope = 'col'; heading.append(corner);
+    heading.setAttribute('aria-rowindex', '1');
     slots.forEach(slot => {
       if (slot.gap) { const gap = node('th'); gap.setAttribute('aria-hidden', 'true'); gap.className = 'moa-grid__gap'; heading.append(gap); return; }
       const col = slot.col, column = this.columns[col];
@@ -948,7 +1107,7 @@ class Grid {
       if (descriptor.type !== 'data') { const group = this.renderGroup(descriptor); group.setAttribute('aria-rowindex', String(displayRow + 2)); body.append(group); continue; }
       const { item: { row, ...item }, viewIndex: rowIndex } = descriptor;
       const tr = node('tr'), index = node('th', String(descriptor.item.position + 1)); index.scope = 'row'; tr.append(index);
-      tr.setAttribute('aria-rowindex', String(displayRow + 2));
+      tr.setAttribute('aria-rowindex', String(displayRow + 2 + (this.remote && this.dataMode === 'pagination' ? this.remote.offset : 0)));
       slots.forEach(slot => {
         if (slot.gap) { const gap = node('td'); gap.setAttribute('aria-hidden', 'true'); gap.className = 'moa-grid__gap'; tr.append(gap); return; }
         const col = slot.col, column = this.columns[col];
@@ -958,7 +1117,7 @@ class Grid {
         if (owner) { td.rowSpan = owner.rowSpan; td.colSpan = owner.colSpan; }
         td.dataset.row = rowIndex; td.dataset.col = col; td.setAttribute('aria-colindex', String(col + 2));
         if (this.model.formulas) { const result = this.model.formulaSheet().cell(item.index, this.model.columns.findIndex(item => item.field === column.field)); if (result.error) { td.classList.add('is-formula-error'); td.title = result.error; } }
-        td.setAttribute('aria-label', `${descriptor.item.position + 1}행 ${column.header || column.field}`);
+        td.setAttribute('aria-label', `${descriptor.item.position + 1}행 ${column.header || column.field}: ${td.textContent || '빈 값'}`);
         const readonly = !this.editable || column.editable === false;
         td.setAttribute('aria-readonly', String(readonly)); td.classList.toggle('is-readonly', readonly);
         if (column.type === 'number') td.classList.add('is-number');
@@ -977,7 +1136,8 @@ class Grid {
     }
     spacer(window.after);
     if (!this.display.length) {
-      const tr = node('tr'), td = node('td', '표시할 데이터가 없습니다. 검색어를 지워보세요.', 'moa-grid__empty'); td.colSpan = slots.length + 1; tr.append(td); body.append(tr);
+      const text = this.remote?.loading ? '서버 데이터를 불러오는 중입니다.' : this.remote?.error ? '데이터를 불러오지 못했습니다. 다시 시도하세요.' : '표시할 데이터가 없습니다. 검색어를 지워보세요.';
+      const tr = node('tr'), td = node('td', text, 'moa-grid__empty'); tr.setAttribute('aria-hidden', 'true'); td.colSpan = slots.length + 1; tr.append(td); body.append(tr);
     }
     this.table.append(body);
     this.table.tabIndex = this.view.length && this.cellElement(this.current) ? -1 : 0;
@@ -985,10 +1145,11 @@ class Grid {
     this.current.row = Math.max(0, Math.min(this.current.row, this.view.length - 1)); this.anchor.row = Math.max(0, Math.min(this.anchor.row, this.view.length - 1));
     this.undoButton.disabled = !this.editable || !this.model.canUndo; this.redoButton.disabled = !this.editable || !this.model.canRedo;
     this.addButton.disabled = !this.editable; this.removeButton.disabled = !this.editable || !this.view.length;
+    this.clearButton.disabled = !this.editable; this.mergeButton.disabled = this.unmergeButton.disabled = !!this.remote;
     this.importButton.disabled = !this.xlsx || !this.editable;
     this.paintSelection();
     if (hadFocus && focusedCell) (this.cellElement(focusedCell) || this.table).focus({ preventScroll: true });
-    this.message(`${this.view.length}행${this.virtualActive ? ' · 가상 스크롤' : ''} · 셀 더블클릭 또는 F2로 편집`);
+    this.message(this.remote ? `${this.view.length}행 표시 · 서버 데이터는 읽기 전용입니다.` : this.view.length ? `${this.view.length}행${this.virtualActive ? ' · 가상 스크롤' : ''} · 셀 더블클릭 또는 F2로 편집` : '표시할 데이터가 없습니다. 검색·필터 조건을 확인하세요.');
   }
 
   message(text, error = false) { this.status.textContent = text; this.status.classList.toggle('is-error', error); }
@@ -1085,6 +1246,7 @@ class Grid {
   }
 
   setGroupBy(fields) {
+    if (this.remote && fields.length) throw new Error('서버 데이터의 그룹/소계는 이 API에서 지원하지 않습니다.');
     if (!Array.isArray(fields) || new Set(fields).size !== fields.length || fields.some(field => !this.columns.some(column => column.field === field))) throw new Error('그룹 컬럼 배열이 올바르지 않습니다.');
     if (fields.length && this.tree) throw new Error('트리와 행 그룹은 별도 모드로 사용하세요.');
     if (this.editor && !this.finishEdit()) return false;
@@ -1112,6 +1274,7 @@ class Grid {
   }
 
   setTree(tree) {
+    if (this.remote && tree) throw new Error('서버 데이터의 트리는 이 API에서 지원하지 않습니다.');
     if (this.editor && !this.finishEdit()) return false;
     let prepared = null;
     if (tree) {
@@ -1121,7 +1284,7 @@ class Grid {
     }
     this.tree = prepared; this.model.validateRows = prepared ? rows => treeIndex(rows, prepared) : null;
     this.model.past = []; this.model.future = [];
-    this.collapsedNodes.clear(); this.merges = []; this.resetSelection(); this.groupSelect.disabled = Boolean(prepared); this.render(); return true;
+    this.collapsedNodes.clear(); this.merges = []; this.resetSelection(); this.groupSelect.disabled = Boolean(prepared) || !!this.remote; this.render(); return true;
   }
 
   toggleNode(id) {
@@ -1171,6 +1334,7 @@ class Grid {
   }
 
   mergeSelection() {
+    if (this.remote) { this.message('서버 데이터의 수동 병합은 지원하지 않습니다.', true); return false; }
     if (!this.view.length || this.editor && !this.finishEdit()) return false;
     if (this.virtualActive) { this.message('가상 스크롤에서는 수동 병합을 지원하지 않습니다.', true); return false; }
     if (this.tree || this.groupBy.length) { this.message('셀 병합은 일반 그리드 모드에서 사용하세요.', true); return false; }
@@ -1203,6 +1367,8 @@ class Grid {
   }
 
   exportXLSX({ fileName = 'moa-grid.xlsx', scope = 'view', sheetName = '데이터', formulas = false } = {}) {
+    if (this.remote?.loading) { this.message('데이터를 불러온 뒤 다운로드하세요.', true); return false; }
+    if (this.remote && ['filtered', 'all'].includes(scope)) return this.exportRemoteXLSX({ fileName, scope, sheetName, formulas });
     if (this.editor && !this.finishEdit()) return false;
     try {
       if (!['view', 'filtered', 'all', 'selection'].includes(scope)) throw new Error('내보내기 scope는 view, filtered, all, selection 중 선택하세요.');
@@ -1270,10 +1436,16 @@ class Grid {
     input.value = initial ?? this.model.rows[dataRow][column.field] ?? '';
     this.editor = { input, cell: { ...cell }, dataRow, column, revision: this.model.revision, composing: false };
     input.addEventListener('compositionstart', () => { if (this.editor?.input === input) this.editor.composing = true; });
-    input.addEventListener('compositionend', () => { if (this.editor?.input === input) { this.editor.composing = false; this.editor.compositionEnded = performance.now(); } });
+    input.addEventListener('compositionend', () => { if (this.editor?.input === input) this.editor.composing = false; });
+    input.addEventListener('keyup', event => { if (event.key === 'Enter' || event.code === 'Enter' || event.code === 'NumpadEnter') { if (this.editor?.input === input) this.editor.compositionConfirm = false; } });
     td.replaceChildren(input); input.focus(); if (initial == null) input.select();
     input.addEventListener('keydown', event => {
-      event.stopPropagation(); if (event.isComposing || event.keyCode === 229 || this.editor?.composing || (event.key === 'Enter' && performance.now() - (this.editor?.compositionEnded ?? -Infinity) < 30)) return;
+      event.stopPropagation();
+      if (event.isComposing || event.keyCode === 229 || this.editor?.composing) {
+        if (event.key === 'Enter' || event.code === 'Enter' || event.code === 'NumpadEnter') this.editor.compositionConfirm = true;
+        return;
+      }
+      if (event.key === 'Enter' && this.editor?.compositionConfirm) return;
       if (event.key === 'Escape') { event.preventDefault(); this.cancelEdit(); }
       else if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault(); const location = { ...this.current };
@@ -1372,8 +1544,8 @@ class Grid {
   }
   getData({ raw = false } = {}) { return raw ? this.model.getData() : this.model.getComputedData(); }
   mutateModel(method, ...args) { this.localWrite = true; try { return this.model[method](...args); } finally { this.localWrite = false; } }
-  setSearch(query) { if (this.editor) this.cancelEdit(); this.query = String(query); this.search.value = this.query; this.merges = []; this.resetSelection(); this.render(); }
-  setData(rows) { this.resetRowWindow(); this.mutateModel('setData', rows); this.dataRevision++; this.editor = null; this.merges = []; this.resetSelection(); this.render(); }
+  setSearch(query) { clearTimeout(this.searchTimer); if (this.editor) this.cancelEdit(); this.query = String(query); this.search.value = this.query; this.merges = []; this.resetSelection(); this.render(); }
+  setData(rows) { if (this.remote) throw new Error('서버 데이터는 reload()로 갱신하세요.'); this.resetRowWindow(); this.mutateModel('setData', rows); this.dataRevision++; this.editor = null; this.merges = []; this.resetSelection(); this.render(); }
   downloadCSV() {
     if (this.editor && !this.finishEdit()) return;
     const quote = value => {
@@ -1385,7 +1557,7 @@ class Grid {
     const blob = new Blob(['\uFEFF' + rows.map(row => row.map(quote).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
     this.downloadFile(blob, 'moa-grid.csv'); this.message('검색·정렬된 데이터를 CSV로 내보냈습니다.');
   }
-  destroy() { this.destroyed = true; this.editor = null; this.resizeObserver.disconnect(); this.unsubscribe?.(); cancelAnimationFrame(this.scrollFrame); this.events.abort(); this.root.remove(); }
+  destroy() { this.destroyed = true; clearTimeout(this.searchTimer); this.remote?.dispose(); this.exportRequest?.abort(); this.editor = null; this.resizeObserver.disconnect(); this.unsubscribe?.(); cancelAnimationFrame(this.scrollFrame); this.events.abort(); this.root.remove(); }
 }
 
 globalThis.MoaGrid = Grid;
