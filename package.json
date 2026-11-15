@@ -1,11 +1,13 @@
 {
   "name": "moa-js-workspace",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Framework independent JavaScript tools for offline business applications.",
   "license": "MIT",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test packages/grid/test/*.test.mjs",

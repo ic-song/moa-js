@@ -44,3 +44,7 @@ macOS에서는 ⌘를 사용하고 다시 실행에 ⌘+Shift+Z도 지원합니�
 ## 공식 참고
 
 [키보드·마우스 동작](https://docs.realgrid.com/tutorial/defaultKeyboardAndMouseControll), [복사·붙여넣기](https://docs.realgrid.com/guides/editing/copy-and-paste), [Undo/Redo](https://docs.realgrid.com/guides/editing/undo)를 참고해 요구사항을 작성했습니다. Delete의 읽기 전용·트랜잭션 정책 등은 Moa가 채택한 설계이며 RealGrid와 모든 옵션이 동일하다는 의미는 아닙니다.
+
+## 0.3 확장 계약
+
+가상화 여부와 무관하게 범위 조작은 전체 표시 데이터에 적용합니다. 수식 모드에서는 편집·이력에 원문을 보관하고 표시·일반 복사에 계산값을 사용합니다. 내부 복사의 상대/절대 참조, XLSX 보존, IME 조합과 외부 데이터 경합 규칙은 [확장 API](grid-advanced.md)에 정의합니다. 가상 모드는 48px 고정 높이를 사용하고 수동 병합은 거부합니다.

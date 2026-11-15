@@ -20,9 +20,9 @@
 
 | 상태 | 항목 수 |
 | --- | ---: |
-| 초기 구현 | 45 |
-| 일부 구현 | 13 |
-| 계획 | 112 |
+| 초기 구현 | 46 |
+| 일부 구현 | 17 |
+| 계획 | 107 |
 
 중요한 구분과 구현 순서는 [로드맵](roadmap.md), 사용자 지정 단축키는 [셀 조작 계약](grid-interaction-contract.md)을 참고한다.
 
@@ -202,7 +202,7 @@
 | EXPORT-008 | 이미지·도형 내보내기 | M3 | 계획 | 로컬 이미지 포함과 위치·크기 보존 | [목차 확인](https://docs.realgrid.com/guides/excels/image-export) |
 | EXPORT-009 | 시트 보호 | M3 | 계획 | 셀 잠금과 시트 옵션; 암호화와 구분 | [목차 확인](https://docs.realgrid.com/guides/excels/sheet-protection) |
 | EXPORT-010 | 셀 메모 내보내기 | M3 | 계획 | 메모 본문과 셀 위치 보존 | [목차 확인](https://docs.realgrid.com/guides/excels/excel-memo) |
-| EXPORT-011 | 수식 내보내기 | M3 | 계획 | xlsx 수식 작성과 화면 계산 필드 구분 | [목차 확인](https://docs.realgrid.com/guides/excels/excel-formula) |
+| EXPORT-011 | 수식 내보내기 | M3 | 일부 구현 | opt-in A1 수식·계산 캐시 XLSX 출력, 헤더 참조 변환·동일 컬럼 순서 가져오기; 전체 Excel 문법·스타일 미지원 | [목차 확인](https://docs.realgrid.com/guides/excels/excel-formula) |
 
 ## 개인화·이벤트·테마
 
@@ -219,10 +219,10 @@
 | STYLE-009 | 클릭·렌더 완료 이벤트 | M1 | 계획 | 데이터 좌표와 화면 좌표 구분 | [목차 확인](https://docs.realgrid.com/guides/events/click-event) |
 | STYLE-010 | 복수 그리드 스크롤 동기화 | M3 | 계획 | 재귀 이벤트와 서로 다른 행 높이 처리 | [목차 확인](https://docs.realgrid.com/guides/events/scroll-event) |
 | STYLE-011 | 접근성 | M0 | 일부 구현 | 키보드·ARIA·포커스 구현; 스크린리더와 IME 실기기 검증 필요 | [본문 검토](https://docs.realgrid.com/tutorial/realgrid-webaccessbility) |
-| STYLE-012 | 대량 데이터 성능 | M2 | 계획 | 테스트 환경·행×열·시간·메모리 공개; 무제한 성능 주장 없음 | [본문 검토](https://docs.realgrid.com/guides/performance/large-data-load-test) |
+| STYLE-012 | 대량 데이터 성능 | M2 | 일부 구현 | 10만 행×12열 및 1천 행×200열 Chromium 실측·가상 DOM 수 검사; 전체 메모리·다른 엔진·서버 공급 후속 | [본문 검토](https://docs.realgrid.com/guides/performance/large-data-load-test) |
 | STYLE-013 | React 연동 | M2 | 계획 | 마운트·갱신·언마운트와 StrictMode 해제 계약 | [목차 확인](https://docs.realgrid.com/tutorial/react-tutorial/on-initialized) |
 | STYLE-014 | Vue 연동 | M2 | 계획 | 반응형 데이터 갱신과 언마운트 해제 계약 | [목차 확인](https://docs.realgrid.com/tutorial/vue-tutorial/on-initialized) |
-| STYLE-015 | RealGrid API 이행 어댑터 | M3 | 계획 | 사용 API 목록별 호환 테스트; 미지원은 명시적 오류 | [목차 확인](https://docs.realgrid.com/refs/Class/GridBase) |
+| STYLE-015 | RealGrid API 이행 어댑터 | M3 | 일부 구현 | 공개 API 일부 이행 계층·지원 인수 문서·공유 provider 회귀 검사; 전체 RealGrid 대조 시험·API 호환 아님 | [본문 검토](https://docs.realgrid.com/refs/Class/GridBase) |
 
 ## Moa 추가 요구사항·확장 제안
 
@@ -233,12 +233,12 @@
 | EXT-003 | 전체 붙여넣기 원자성 | M0 | 초기 구현 | 잘못된 값·범위 초과가 하나라도 있으면 전체 반영 취소 | 자체 요구 |
 | EXT-004 | 실행 취소 가능한 범위 지우기 | M0 | 초기 구현 | 읽기 전용 보호; 필수값 오류 시 전체 삭제 취소 | 자체 요구 |
 | EXT-005 | CSV 내보내기 | M0 | 초기 구현 | UTF-8 BOM·따옴표·줄바꿈·수식 문자열 완화 처리 | 자체 요구 |
-| EXT-006 | 가상 스크롤 | M2 | 계획 | 보이는 행·열 중심 렌더링; 선택과 클립보드는 전체 모델 기준 | 자체 요구 |
+| EXT-006 | 가상 스크롤 | M2 | 초기 구현 | 200행/30열 초과 시 행·열 가상 렌더링, 고정 열·키보드·화면 밖 범위 조작; 고정 48px·수동 병합 제외 | 자체 요구 |
 | EXT-007 | 선택 영역 채우기 핸들 | M3 | 계획 | 동일 값 복제와 연속값 채우기를 구분 | 자체 요구 |
-| EXT-008 | 엑셀식 수식 엔진 | M3 | 계획 | 별도 선택 모듈로 참조·의존·순환 계산 지원; 현재 그리드 범위 밖 | 자체 요구 |
+| EXT-008 | 엑셀식 수식 엔진 | M3 | 일부 구현 | opt-in A1/$ 참조·범위·산술·비교·13개 함수·오류·Undo/Redo·XLSX; 주소 구조 자동 재작성·전체 Excel 문법 제외 | 자체 요구 |
 | EXT-009 | TypeScript 타입 선언 | M1 | 계획 | 공개 옵션·이벤트·좌표·변경 레코드의 타입 계약 | 자체 요구 |
 | EXT-010 | 오프라인 배포 검증 | M1 | 초기 구현 | 배포 파일 SHA256SUMS·선택 의존성 라이선스·로컬 동봉·망 차단 검증 | 자체 요구 |
-| EXT-011 | 성능·호환 회귀 스위트 | M1 | 일부 구현 | 모델·Chromium·실제 Excel 생성 파일과 복사 데이터 검증; 다른 엔진·IME·스크린리더는 후속 | 자체 요구 |
+| EXT-011 | 성능·호환 회귀 스위트 | M1 | 일부 구현 | 단위·Chromium·실제 Excel·10만 행/200열·API 일부 이행·composition 파이프라인 검사; 네이티브 IME·다른 엔진·스크린리더 후속 | 자체 요구 |
 | EXT-012 | 패키지별 배포·독립 사용 | M0 | 일부 구현 | 현재 grid JS·CSS 독립 제공; npm 등록과 향후 모듈은 미실행 | 자체 요구 |
 | EXT-013 | 폼·트리·다이얼로그 독립 모듈 | M3 | 계획 | 그리드 공통 코드의 실제 재사용 근거가 생길 때 패키지 분리 | 자체 요구 |
 | EXT-014 | 붙여넣기 자동 행 확장 | M0 | 초기 구현 | 일반 무필터 모드에서 빈 표·마지막 행 이후 붙여넣기를 한 번에 적용·Undo/Redo | 자체 요구 |

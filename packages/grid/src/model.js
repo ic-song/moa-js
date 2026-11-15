@@ -1,3 +1,5 @@
+import { FormulaSheet, isFormula } from './formula.js';
+
 export function parseTSV(text) {
   const rows = [[]];
   let value = '', quoted = false;
@@ -31,7 +33,7 @@ export function toTSV(rows) {
 }
 
 export class GridModel {
-  constructor(columns, rows = [], { editable = true, historyLimit = 100 } = {}) {
+  constructor(columns, rows = [], { editable = true, historyLimit = 100, formulas = false } = {}) {
     if (!Array.isArray(columns) || !columns.length) throw new Error('컬럼이 필요합니다.');
     const keys = columns.map(column => column.field);
     if (keys.some(key => typeof key !== 'string' || !key || ['__proto__', 'constructor', 'prototype'].includes(key)) || new Set(keys).size !== keys.length) {
@@ -41,6 +43,7 @@ export class GridModel {
     this.columns = columns.map(column => ({ ...column }));
     this.editable = editable;
     this.historyLimit = historyLimit;
+    this.formulas = !!formulas; this.revision = 0; this.listeners = new Set();
     this.setData(rows);
   }
 
@@ -49,13 +52,34 @@ export class GridModel {
     this.validateRows?.(rows);
     this.rows = rows.map(row => ({ ...row }));
     this.past = []; this.future = [];
+    this.touch('reset', []);
   }
 
   getData() { return this.rows.map(row => ({ ...row })); }
+  getComputedData() { return this.formulas ? this.formulaSheet().getData() : this.getData(); }
+  formulaSheet() { return this.sheet ||= new FormulaSheet(this.rows, this.columns); }
+  subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  touch(reason, changes) {
+    this.revision++; this.sheet = null;
+    for (const listener of this.listeners) {
+      try { listener({ reason, changes, revision: this.revision }); }
+      catch (error) { queueMicrotask(() => { throw error; }); }
+    }
+  }
+  validateFormulas(rows) {
+    if (!this.formulas) return;
+    const sheet = new FormulaSheet(rows, this.columns);
+    rows.forEach((row, r) => this.columns.forEach((column, c) => {
+      if (!isFormula(row[column.field]) || column.formulas === false) return;
+      const result = sheet.cell(r, c);
+      if (!result.error) this.convert({ ...column, formulas: false }, result.value);
+    }));
+  }
   get canUndo() { return this.past.length > 0; }
   get canRedo() { return this.future.length > 0; }
 
   convert(column, value) {
+    if (this.formulas && column.formulas !== false && isFormula(value)) return value;
     if (value === '' || value == null) {
       if (column.required) throw new Error(`${column.header || column.field}: 필수 값입니다.`);
       return column.type === 'number' || column.type === 'boolean' ? null : '';
@@ -91,13 +115,14 @@ export class GridModel {
     }
     // Validate the entire transaction before changing any cell.
     if (!transaction.length) return [];
-    if (this.validateRows) {
+    if (this.validateRows || this.formulas) {
       const candidate = this.getData();
       for (const change of transaction) candidate[change.row][change.field] = change.value;
-      this.validateRows(candidate);
+      this.validateRows?.(candidate); this.validateFormulas(candidate);
     }
     for (const change of transaction) this.rows[change.row][change.field] = change.value;
     this.remember({ changes: transaction, reason });
+    this.touch(reason, transaction);
     return transaction.map(change => ({ ...change }));
   }
 
@@ -113,10 +138,12 @@ export class GridModel {
     const next = rows.map(row => ({ ...row }));
     if (validate) for (const row of next) for (const column of this.columns) row[column.field] = this.convert(column, row[column.field]);
     this.validateRows?.(next);
+    this.validateFormulas(next);
     const before = this.getData();
     if (JSON.stringify(before) === JSON.stringify(next)) return [];
     this.rows = next;
     this.remember({ reason, before, after: this.getData() });
+    this.touch(reason, [{ kind: 'rows' }]);
     return [{ kind: 'rows', row: -1, field: null, previous: before.map(row => ({ ...row })), value: this.getData() }];
   }
 
@@ -137,10 +164,12 @@ export class GridModel {
     if (!entry) return [];
     if (entry.before) {
       this.rows = entry.before.map(row => ({ ...row })); this.future.push(entry);
+      this.touch('undo', [{ kind: 'rows' }]);
       return [{ kind: 'rows', row: -1, field: null, previous: entry.after.map(row => ({ ...row })), value: this.getData() }];
     }
     for (const change of entry.changes) this.rows[change.row][change.field] = change.previous;
     this.future.push(entry);
+    this.touch('undo', entry.changes);
     return entry.changes.map(change => ({ ...change, value: change.previous, previous: change.value }));
   }
 
@@ -149,10 +178,12 @@ export class GridModel {
     if (!entry) return [];
     if (entry.after) {
       this.rows = entry.after.map(row => ({ ...row })); this.past.push(entry);
+      this.touch('redo', [{ kind: 'rows' }]);
       return [{ kind: 'rows', row: -1, field: null, previous: entry.before.map(row => ({ ...row })), value: this.getData() }];
     }
     for (const change of entry.changes) this.rows[change.row][change.field] = change.value;
     this.past.push(entry);
+    this.touch('redo', entry.changes);
     return entry.changes.map(change => ({ ...change }));
   }
 }

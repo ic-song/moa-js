@@ -2,6 +2,8 @@ import { GridModel, parseTSV, toTSV } from './model.js';
 import { FILTER_OPERATORS, buildDisplay, treeIndex } from './data-view.js';
 import { parseClipboardData } from './clipboard.js';
 import { readXLSX, writeXLSX } from './xlsx.js';
+import { virtualWindow, columnWindow } from './virtual.js';
+import { isFormula, translateFormula } from './formula.js';
 
 let gridSequence = 0;
 
@@ -17,8 +19,9 @@ export class Grid {
     this.host = typeof target === 'string' ? document.querySelector(target) : target;
     if (!this.host || this.host.childNodes.length) throw new Error('비어 있는 그리드 컨테이너가 필요합니다.');
     this.options = options;
-    this.model = new GridModel(options.columns, options.data || [], options);
-    this.columns = this.model.columns;
+    this.model = options.model || new GridModel(options.columns, options.data || [], options);
+    this.columns = options.model ? options.columns.map(column => ({ ...column })) : this.model.columns;
+    this.virtual = options.virtual !== false; this.rowHeight = 48;
     this.anchor = { row: 0, col: 0 }; this.current = { ...this.anchor };
     this.query = ''; this.sorts = []; this.filters = []; this.filterLogic = 'and'; this.groupBy = []; this.tree = null;
     this.collapsedGroups = new Set(); this.collapsedNodes = new Set(); this.merges = []; this.mergeOwners = new Map();
@@ -51,7 +54,7 @@ export class Grid {
     this.fileInput.addEventListener('change', async () => { const file = this.fileInput.files[0]; if (file) await this.importXLSX(file); this.fileInput.value = ''; }, { signal });
     this.importButton = button('XLSX 가져오기', () => this.fileInput.click());
     this.exportButton = button('XLSX 내보내기', () => this.exportXLSX());
-    this.importButton.disabled = !this.xlsx || !this.model.editable; this.exportButton.disabled = !this.xlsx;
+    this.importButton.disabled = !this.xlsx || !this.editable; this.exportButton.disabled = !this.xlsx;
     const frozenLabel = node('label', '고정 열 ', 'moa-grid__option'); this.frozenSelect = node('select');
     this.frozenSelect.setAttribute('aria-label', '고정 열');
     for (let count = 0; count <= this.columns.length; count++) { const option = node('option', count ? `${count}열` : '없음'); option.value = count; this.frozenSelect.append(option); }
@@ -72,8 +75,8 @@ export class Grid {
     this.root.append(this.toolbar, this.filterPanel, this.viewport, this.status, this.fileInput); this.host.append(this.root);
     this.table.addEventListener('keydown', event => this.onKey(event), { signal });
     this.table.addEventListener('dblclick', event => { const cell = this.cellAt(event.target); if (cell) this.startEdit(cell); }, { signal });
-    this.table.addEventListener('compositionstart', event => {
-      if (!this.editor) { const cell = this.cellAt(event.target); if (cell) this.startEdit(cell); }
+    this.table.addEventListener('beforeinput', event => {
+      if (!this.editor && event.inputType === 'insertCompositionText') { const cell = this.cellAt(event.target); if (cell) this.startEdit(cell, ''); }
     }, { signal });
     this.table.addEventListener('pointerdown', event => {
       if (event.button !== 0 || this.editor?.input.contains(event.target)) return;
@@ -91,10 +94,22 @@ export class Grid {
       this.setColumnWidth(this.resizing.field, this.resizing.width + event.clientX - this.resizing.x);
     }, { signal });
     document.addEventListener('pointerup', () => { this.resizing = null; }, { signal });
-    this.resizeObserver = new ResizeObserver(() => this.updateColumnGeometry()); this.resizeObserver.observe(this.viewport);
+    this.viewport.addEventListener('scroll', () => {
+      if (!this.virtualActive || this.editor) return;
+      if (!this.scrollFrame) this.scrollFrame = requestAnimationFrame(() => { this.scrollFrame = 0; if (!this.destroyed && !this.editor) this.renderViewport(); });
+    }, { signal });
+    this.unsubscribe = this.model.subscribe(() => {
+      if (this.localWrite || this.destroyed) return;
+      this.dataRevision++;
+      if (this.editor) { this.message('외부 데이터가 변경됐습니다. 편집을 취소하고 다시 입력하세요.', true); return; }
+      this.merges = []; this.render();
+    });
+    this.resizeObserver = new ResizeObserver(() => { if (this.virtualActive && !this.editor) this.renderViewport(); else this.updateColumnGeometry(); }); this.resizeObserver.observe(this.viewport);
     this.table.addEventListener('copy', event => {
       if (this.editor || !event.clipboardData || !this.view.length) return;
-      event.clipboardData.setData('text/plain', this.copySelection()); event.preventDefault();
+      event.clipboardData.setData('text/plain', this.copySelection());
+      if (this.model.formulas) event.clipboardData.setData('application/x-moa-grid', JSON.stringify(this.copyRawSelection()));
+      event.preventDefault();
       this.message('선택 영역을 복사했습니다. 엑셀에 붙여넣을 수 있습니다.');
     }, { signal });
     this.table.addEventListener('paste', event => {
@@ -106,7 +121,17 @@ export class Grid {
         const left = this.getSelection().left;
         const numeric = new Set(this.columns.slice(left).map((column, index) => column.type === 'number' ? index : -1));
         const matrix = parseClipboardData(plain, html, numeric);
-        this.paste(matrix);
+        const own = event.clipboardData.getData('application/x-moa-grid');
+        if (own && this.model.formulas) {
+          const payload = JSON.parse(own);
+          if (payload.version !== 1 || !Array.isArray(payload.cells)) throw new Error('수식 클립보드 형식이 올바르지 않습니다.');
+          const top = this.getSelection().top;
+          const translated = payload.cells.map((row, y) => row.map((cell, x) => {
+            if (!cell || !Number.isInteger(cell.row) || !Number.isInteger(cell.col)) throw new Error('수식 클립보드 좌표가 올바르지 않습니다.');
+            return translateFormula(cell.value, (this.view[top + y]?.index ?? this.model.rows.length + top + y - this.view.length) - cell.row, this.model.columns.findIndex(item => item.field === this.columns[left + x]?.field) - cell.col);
+          }));
+          this.paste(translated);
+        } else this.paste(matrix);
       } catch (error) { this.message(error.message, true); }
     }, { signal });
     try {
@@ -116,6 +141,8 @@ export class Grid {
       if (options.groupBy) this.setGroupBy(options.groupBy);
     } catch (error) { this.destroy(); throw error; }
   }
+
+  get editable() { return this.model.editable && this.options.editable !== false; }
 
   cellAt(target) {
     const cell = target.closest?.('td[data-row]');
@@ -150,6 +177,19 @@ export class Grid {
   }
 
   focusCell() {
+    if (this.virtualActive && this.view.length) {
+      const index = this.displayIndex.get(this.current.row), top = index * this.rowHeight;
+      if (this.virtualRows) {
+        if (top < this.viewport.scrollTop) this.viewport.scrollTop = top;
+        else if (top + this.rowHeight + 56 > this.viewport.scrollTop + this.viewport.clientHeight) this.viewport.scrollTop = top + this.rowHeight + 56 - this.viewport.clientHeight;
+      }
+      const layout = columnWindow(this.columns, 0, 0, this.frozenColumns, false), left = layout.offsets[this.current.col], right = layout.offsets[this.current.col + 1];
+      if (this.current.col >= this.frozenColumns) {
+        if (left < this.viewport.scrollLeft + layout.offsets[this.frozenColumns]) this.viewport.scrollLeft = left - layout.offsets[this.frozenColumns];
+        else if (right > this.viewport.scrollLeft + this.viewport.clientWidth) this.viewport.scrollLeft = right - this.viewport.clientWidth;
+      }
+      this.renderViewport();
+    }
     const cell = this.cellElement(this.current);
     if (!cell) { this.table.focus({ preventScroll: true }); return; }
     cell.focus({ preventScroll: true });
@@ -178,18 +218,36 @@ export class Grid {
   }
 
   render() {
-    const result = buildDisplay(this.model.rows, this); this.view = result.view; this.display = result.display;
+    const result = buildDisplay(this.model.formulas ? this.model.getComputedData() : this.model.rows, this); this.view = result.view; this.display = result.display;
+    this.virtualRows = this.virtual && this.display.length > 200; this.virtualCols = this.virtual && this.columns.length > 30;
+    this.virtualActive = this.virtualRows || this.virtualCols;
+    if (this.virtualActive) this.merges = [];
+
+    this.root.classList.toggle('moa-grid--virtual', this.virtualActive);
+    this.displayIndex = new Map(); this.display.forEach((entry, index) => { if (entry.type === 'data') this.displayIndex.set(entry.viewIndex, index); });
+    this.renderViewport();
+  }
+
+  renderViewport() {
+    if (this.editor) return;
+    const window = this.virtualRows ? virtualWindow(this.display.length, this.viewport.scrollTop, this.viewport.clientHeight || 530, this.rowHeight) : { start: 0, end: this.display.length, before: 0, after: 0 };
+    this.layout = columnWindow(this.columns, this.viewport.scrollLeft, this.viewport.clientWidth || 800, this.frozenColumns, this.virtualCols);
+    const slots = this.layout.slots;
+    const hadFocus = this.table.contains(document.activeElement);
+    const focusedCell = this.cellAt(document.activeElement);
     this.mergeOwners = new Map();
     for (const merge of this.merges) for (let row = merge.row; row < merge.row + merge.rowSpan; row++) for (let col = merge.col; col < merge.col + merge.colSpan; col++) this.mergeOwners.set(`${row}:${col}`, merge);
     this.table.replaceChildren();
     const colgroup = node('colgroup'); colgroup.append(node('col'));
-    for (const column of this.columns) { const col = node('col'); col.dataset.field = column.field; colgroup.append(col); }
+    for (const slot of slots) { const col = node('col'); col.style.width = `${slot.width}px`; if (!slot.gap) col.dataset.field = this.columns[slot.col].field; colgroup.append(col); }
     this.table.append(colgroup);
-    this.table.setAttribute('aria-rowcount', String(this.view.length + 1)); this.table.setAttribute('aria-colcount', String(this.columns.length + 1));
+    this.table.setAttribute('aria-rowcount', String(this.display.length + 1)); this.table.setAttribute('aria-colcount', String(this.columns.length + 1));
     const head = node('thead'), heading = node('tr'), corner = node('th', '#'); corner.scope = 'col'; heading.append(corner);
-    this.columns.forEach((column, col) => {
+    slots.forEach(slot => {
+      if (slot.gap) { const gap = node('th'); gap.setAttribute('aria-hidden', 'true'); gap.className = 'moa-grid__gap'; heading.append(gap); return; }
+      const col = slot.col, column = this.columns[col];
       const th = node('th'); th.scope = 'col';
-      th.dataset.col = col;
+      th.dataset.col = col; th.setAttribute('aria-colindex', String(col + 2));
       const sortIndex = this.sorts.findIndex(sort => sort.field === column.field), sorted = this.sorts[sortIndex];
       th.setAttribute('aria-sort', sorted ? sortIndex ? 'other' : sorted.direction === 1 ? 'ascending' : 'descending' : 'none');
       const control = node('button', `${column.header || column.field}${column.editable === false ? ' (읽기 전용)' : ''}${sorted ? `${sorted.direction === 1 ? ' ↑' : ' ↓'}${this.sorts.length > 1 ? ' ' + (sortIndex + 1) : ''}` : ''}`);
@@ -208,18 +266,25 @@ export class Grid {
     });
     head.append(heading); this.table.append(head);
     const body = node('tbody');
-    for (const descriptor of this.display) {
-      if (descriptor.type !== 'data') { body.append(this.renderGroup(descriptor)); continue; }
+    const spacer = height => { if (!height) return; const tr = node('tr'), td = node('td'); tr.setAttribute('aria-hidden', 'true'); tr.className = 'moa-grid__spacer'; td.colSpan = slots.length + 1; td.style.height = `${height}px`; tr.append(td); body.append(tr); };
+    spacer(window.before);
+    for (let displayRow = window.start; displayRow < window.end; displayRow++) {
+      const descriptor = this.display[displayRow];
+      if (descriptor.type !== 'data') { const group = this.renderGroup(descriptor); group.setAttribute('aria-rowindex', String(displayRow + 2)); body.append(group); continue; }
       const { item: { row, ...item }, viewIndex: rowIndex } = descriptor;
       const tr = node('tr'), index = node('th', String(rowIndex + 1)); index.scope = 'row'; tr.append(index);
-      this.columns.forEach((column, col) => {
+      tr.setAttribute('aria-rowindex', String(displayRow + 2));
+      slots.forEach(slot => {
+        if (slot.gap) { const gap = node('td'); gap.setAttribute('aria-hidden', 'true'); gap.className = 'moa-grid__gap'; tr.append(gap); return; }
+        const col = slot.col, column = this.columns[col];
         const owner = this.mergeOwners.get(`${rowIndex}:${col}`);
         if (owner && (owner.row !== rowIndex || owner.col !== col)) return;
         const td = node('td', row[column.field] == null ? '' : String(row[column.field]));
         if (owner) { td.rowSpan = owner.rowSpan; td.colSpan = owner.colSpan; }
-        td.dataset.row = rowIndex; td.dataset.col = col;
+        td.dataset.row = rowIndex; td.dataset.col = col; td.setAttribute('aria-colindex', String(col + 2));
+        if (this.model.formulas) { const result = this.model.formulaSheet().cell(item.index, this.model.columns.findIndex(item => item.field === column.field)); if (result.error) { td.classList.add('is-formula-error'); td.title = result.error; } }
         td.setAttribute('aria-label', `${rowIndex + 1}행 ${column.header || column.field}`);
-        const readonly = !this.model.editable || column.editable === false;
+        const readonly = !this.editable || column.editable === false;
         td.setAttribute('aria-readonly', String(readonly)); td.classList.toggle('is-readonly', readonly);
         if (column.type === 'number') td.classList.add('is-number');
         if (this.tree && column.field === this.tree.labelField) {
@@ -235,16 +300,20 @@ export class Grid {
         tr.append(td);
       }); body.append(tr);
     }
+    spacer(window.after);
     if (!this.display.length) {
-      const tr = node('tr'), td = node('td', '표시할 데이터가 없습니다. 검색어를 지워보세요.', 'moa-grid__empty'); td.colSpan = this.columns.length + 1; tr.append(td); body.append(tr);
+      const tr = node('tr'), td = node('td', '표시할 데이터가 없습니다. 검색어를 지워보세요.', 'moa-grid__empty'); td.colSpan = slots.length + 1; tr.append(td); body.append(tr);
     }
     this.table.append(body);
-    this.table.tabIndex = this.view.length ? -1 : 0;
+    this.table.tabIndex = this.view.length && this.cellElement(this.current) ? -1 : 0;
     this.updateColumnGeometry();
     this.current.row = Math.max(0, Math.min(this.current.row, this.view.length - 1)); this.anchor.row = Math.max(0, Math.min(this.anchor.row, this.view.length - 1));
-    this.undoButton.disabled = !this.model.canUndo; this.redoButton.disabled = !this.model.canRedo;
-    this.addButton.disabled = !this.model.editable; this.removeButton.disabled = !this.model.editable || !this.view.length;
-    this.paintSelection(); this.message(`${this.view.length}행 · 셀 더블클릭 또는 F2로 편집`);
+    this.undoButton.disabled = !this.editable || !this.model.canUndo; this.redoButton.disabled = !this.editable || !this.model.canRedo;
+    this.addButton.disabled = !this.editable; this.removeButton.disabled = !this.editable || !this.view.length;
+    this.importButton.disabled = !this.xlsx || !this.editable;
+    this.paintSelection();
+    if (hadFocus && focusedCell) (this.cellElement(focusedCell) || this.table).focus({ preventScroll: true });
+    this.message(`${this.view.length}행${this.virtualActive ? ' · 가상 스크롤' : ''} · 셀 더블클릭 또는 F2로 편집`);
   }
 
   message(text, error = false) { this.status.textContent = text; this.status.classList.toggle('is-error', error); }
@@ -315,34 +384,28 @@ export class Grid {
   setColumnWidth(field, width) {
     const column = this.columns.find(column => column.field === field);
     if (!column || !Number.isFinite(Number(width))) throw new Error('올바른 컬럼과 너비가 필요합니다.');
-    column.width = Math.max(64, Math.min(1000, Math.round(Number(width)))); this.updateColumnGeometry();
+    column.width = Math.max(64, Math.min(1000, Math.round(Number(width)))); if (this.virtualActive && !this.editor) this.renderViewport(); else this.updateColumnGeometry();
     this.options.onColumnResize?.({ field, width: column.width });
   }
 
   setFrozenColumns(count) {
     if (!Number.isInteger(count) || count < 0 || count > this.columns.length) throw new Error('고정 열 수가 올바르지 않습니다.');
-    const widths = [...this.table.querySelectorAll('thead tr:first-child > th')].slice(0, count + 1).reduce((sum, header) => sum + header.getBoundingClientRect().width, 0);
+    const widths = columnWindow(this.columns, 0, 0, count, false).offsets[count];
     if (count && widths > this.viewport.clientWidth - 64) { this.frozenSelect.value = this.frozenColumns; this.message('고정 영역이 화면보다 큽니다. 고정할 열 수를 줄이세요.', true); return false; }
     if (this.editor && !this.finishEdit()) { this.frozenSelect.value = this.frozenColumns; return false; }
     this.frozenColumns = count; this.frozenSelect.value = count; this.merges = []; this.render(); return true;
   }
 
   updateColumnGeometry() {
+    const layout = columnWindow(this.columns, this.viewport.scrollLeft, this.viewport.clientWidth || 800, this.frozenColumns, this.virtualCols);
     const cols = this.table.querySelectorAll('colgroup col'); if (!cols.length) return;
-    cols[0].style.width = '48px'; let total = 48;
-    this.columns.forEach((column, index) => {
-      const width = Math.max(64, Math.min(1000, Number(column.width) || 140));
-      cols[index + 1].style.width = `${width}px`; total += width;
-      this.table.querySelector(`thead th[data-col="${index}"] [role=separator]`)?.setAttribute('aria-valuenow', String(width));
-    });
-    this.table.style.width = `${total}px`;
-    const heads = this.table.querySelectorAll('thead tr:first-child > th'); let offset = heads[0]?.getBoundingClientRect().width || 48;
-    for (let col = 0; col < this.columns.length; col++) {
-      const elements = this.table.querySelectorAll(`th[data-col="${col}"],td[data-col="${col}"]`);
-      for (const cell of elements) {
-        cell.classList.toggle('is-frozen', col < this.frozenColumns); cell.style.left = col < this.frozenColumns ? `${offset}px` : '';
-      }
-      offset += heads[col + 1]?.getBoundingClientRect().width || 0;
+    cols[0].style.width = '48px';
+    layout.slots.forEach((slot, index) => { if (cols[index + 1]) cols[index + 1].style.width = `${slot.width}px`; });
+    this.table.style.width = `${layout.total}px`;
+    for (const cell of this.table.querySelectorAll('[data-col]')) {
+      const col = Number(cell.dataset.col), frozen = col < this.frozenColumns;
+      cell.classList.toggle('is-frozen', frozen); cell.style.left = frozen ? `${layout.offsets[col]}px` : '';
+      cell.querySelector('[role=separator]')?.setAttribute('aria-valuenow', String(layout.offsets[col + 1] - layout.offsets[col]));
     }
   }
 
@@ -361,14 +424,14 @@ export class Grid {
   renderGroup(descriptor) {
     const row = node('tr', null, descriptor.type === 'group' ? 'moa-grid__group' : 'moa-grid__subtotal'), group = descriptor.group;
     if (descriptor.type === 'group') {
-      const cell = node('td'); cell.colSpan = this.columns.length + 1;
+      const cell = node('td'); cell.colSpan = this.layout.slots.length + 1;
       const column = this.columns.find(column => column.field === group.field);
       const toggle = node('button', `${group.expanded ? '−' : '+'} ${column.header || group.field}: ${group.value === '' ? '(빈 값)' : group.value} · ${group.count}행`); toggle.type = 'button'; toggle.dataset.groupKey = group.key; toggle.style.paddingInlineStart = `${12 + group.depth * 18}px`; toggle.setAttribute('aria-expanded', String(group.expanded));
       toggle.addEventListener('click', () => { if (this.collapsedGroups.has(group.key)) this.collapsedGroups.delete(group.key); else this.collapsedGroups.add(group.key); this.resetSelection(); this.render(); [...this.table.querySelectorAll('[data-group-key]')].find(button => button.dataset.groupKey === group.key)?.focus(); });
       cell.append(toggle); row.append(cell);
     } else {
       const index = node('th', 'Σ'); index.scope = 'row'; row.append(index);
-      this.columns.forEach((column, col) => { const cell = node('td', column.type === 'number' ? String(group.summary[column.field]) : col === 0 ? '소계' : ''); cell.dataset.col = col; if (column.type === 'number') cell.classList.add('is-number'); row.append(cell); });
+      this.layout.slots.forEach(slot => { if (slot.gap) { const gap = node('td'); gap.className = 'moa-grid__gap'; gap.setAttribute('aria-hidden', 'true'); row.append(gap); return; } const col = slot.col, column = this.columns[col]; const cell = node('td', column.type === 'number' ? String(group.summary[column.field]) : col === 0 ? '소계' : ''); cell.dataset.col = col; if (column.type === 'number') cell.classList.add('is-number'); row.append(cell); });
     }
     return row;
   }
@@ -395,7 +458,7 @@ export class Grid {
   }
 
   makeRow(values = {}, offset = 0) {
-    const row = Object.fromEntries(this.columns.map(column => [column.field, typeof column.defaultValue === 'function' ? column.defaultValue(this.model.rows.length + offset) : column.defaultValue ?? (['number', 'boolean'].includes(column.type) ? null : '')]));
+    const row = Object.fromEntries(this.model.columns.map(column => [column.field, typeof column.defaultValue === 'function' ? column.defaultValue(this.model.rows.length + offset) : column.defaultValue ?? (['number', 'boolean'].includes(column.type) ? null : '')]));
     Object.assign(row, values);
     if (this.tree && !row[this.tree.idField]) {
       let index = this.model.rows.length + offset + 1;
@@ -406,10 +469,10 @@ export class Grid {
   }
 
   addRow(values = {}) {
-    if (!this.model.editable || this.editor && !this.finishEdit()) return false;
+    if (!this.editable || this.editor && !this.finishEdit()) return false;
     const row = this.makeRow(values);
     const index = this.model.rows.length; let changes;
-    try { changes = this.model.insertRows(index, [row]); }
+    try { changes = this.mutateModel('insertRows', index, [row]); }
     catch (error) { this.message(error.message, true); return false; }
     this.query = ''; this.search.value = ''; this.setFilters([]); this.changed(changes, 'insert');
     const visible = this.view.findIndex(item => item.index === index);
@@ -418,7 +481,7 @@ export class Grid {
   }
 
   deleteSelectedRows() {
-    if (!this.model.editable || !this.view.length || this.editor && !this.finishEdit()) return false;
+    if (!this.editable || !this.view.length || this.editor && !this.finishEdit()) return false;
     const range = this.getSelection(), indices = new Set(this.view.slice(range.top, range.bottom + 1).map(item => item.index));
     if (this.tree) {
       const { byId, children } = treeIndex(this.model.rows, this.tree);
@@ -426,13 +489,14 @@ export class Grid {
       while (pending.length) { const item = pending.pop(); indices.add(item.index); pending.push(...(children.get(item.id) || [])); }
     }
     let changes;
-    try { changes = this.model.removeRows([...indices]); }
+    try { changes = this.mutateModel('removeRows', [...indices]); }
     catch (error) { this.message(error.message, true); return false; }
     this.changed(changes, 'delete'); return true;
   }
 
   mergeSelection() {
     if (!this.view.length || this.editor && !this.finishEdit()) return false;
+    if (this.virtualActive) { this.message('가상 스크롤에서는 수동 병합을 지원하지 않습니다.', true); return false; }
     if (this.tree || this.groupBy.length) { this.message('셀 병합은 일반 그리드 모드에서 사용하세요.', true); return false; }
     const range = this.getSelection();
     if (range.top === range.bottom && range.left === range.right) { this.message('병합할 여러 셀을 선택하세요.', true); return false; }
@@ -448,7 +512,7 @@ export class Grid {
   }
 
   async importXLSX(file, options = {}) {
-    if (!this.model.editable || this.editor && !this.finishEdit()) return false;
+    if (!this.editable || this.editor && !this.finishEdit()) return false;
     const revision = this.dataRevision, sequence = ++this.importSequence;
     let rows, changes;
     try {
@@ -457,17 +521,18 @@ export class Grid {
       if (bytes.byteLength > 20 * 1024 * 1024) throw new Error('20MB 이하의 XLSX 파일을 선택하세요.');
       if (this.destroyed || sequence !== this.importSequence) return false;
       if (revision !== this.dataRevision) throw new Error('파일을 읽는 동안 데이터가 변경됐습니다. 다시 가져오세요.');
-      rows = readXLSX(bytes, this.xlsx, this.columns, options); changes = this.model.replaceRows(rows, 'import');
+      rows = readXLSX(bytes, this.xlsx, this.columns, { formulas: this.model.formulas, ...options }); changes = this.mutateModel('replaceRows', rows, 'import');
     } catch (error) { this.message(error.message, true); return false; }
     this.query = ''; this.search.value = ''; this.setFilters([]); this.changed(changes, 'import'); this.message(`${rows.length}행 XLSX 가져오기 완료 · Ctrl+Z로 원복`); return true;
   }
 
-  exportXLSX({ fileName = 'moa-grid.xlsx', scope = 'view', sheetName = '데이터' } = {}) {
+  exportXLSX({ fileName = 'moa-grid.xlsx', scope = 'view', sheetName = '데이터', formulas = false } = {}) {
     if (this.editor && !this.finishEdit()) return false;
     try {
       if (!['view', 'all'].includes(scope)) throw new Error('내보내기 scope는 view 또는 all이어야 합니다.');
-      const rows = scope === 'all' ? this.getData() : this.view.map(item => item.row);
-      const bytes = writeXLSX(rows, this.xlsx, this.columns, { sheetName, merges: scope === 'view' ? this.merges : [] });
+      if (formulas && (!this.model.formulas || scope !== 'all')) throw new Error('수식 보존은 formulas 모드에서 scope: all로 내보내세요.');
+      const rows = scope === 'all' ? this.getData({ raw: formulas }) : this.view.map(item => item.row);
+      const bytes = writeXLSX(rows, this.xlsx, this.columns, { sheetName, merges: scope === 'view' ? this.merges : [], formulas });
       this.downloadFile(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileName);
       this.message(`${rows.length}행 XLSX 내보내기 완료`); return true;
     } catch (error) { this.message(error.message, true); return false; }
@@ -478,7 +543,8 @@ export class Grid {
   }
 
   onKey(event) {
-    if (this.editor || event.isComposing || event.keyCode === 229) return;
+    if (this.editor) return;
+    if (event.isComposing || event.keyCode === 229) { if (this.cellAt(event.target)) this.startEdit(this.current, ''); return; }
     if (event.target.closest('button,[role=separator]')) return;
     const modifier = event.ctrlKey || event.metaKey, key = event.key.toLowerCase();
     if (modifier && (key === 'z' || key === 'y')) {
@@ -488,7 +554,7 @@ export class Grid {
       if (!this.view.length) return;
       event.preventDefault(); this.anchor = { row: 0, col: 0 }; this.select({ row: this.view.length - 1, col: this.columns.length - 1 }, true); return;
     }
-    if (!this.cellAt(event.target) || !this.view.length) return;
+    if ((!this.cellAt(event.target) && event.target !== this.table) || !this.view.length) return;
     if (modifier && event.key === 'Delete') { event.preventDefault(); this.deleteSelectedRows(); return; }
     if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); this.clearSelection(); return; }
     const destination = { ...this.current };
@@ -511,7 +577,7 @@ export class Grid {
 
   startEdit(cell, initial) {
     cell = this.mergeOwners.get(`${cell.row}:${cell.col}`) || cell;
-    if (this.editor || !this.model.editable || this.columns[cell.col].editable === false || !this.view[cell.row]) return;
+    if (this.editor || !this.editable || this.columns[cell.col].editable === false || !this.view[cell.row]) return;
     this.select(cell);
     const column = this.columns[cell.col], dataRow = this.view[cell.row].index;
     const td = this.table.querySelector('td[tabindex="0"]'), input = node('input');
@@ -519,10 +585,12 @@ export class Grid {
     input.setAttribute('aria-describedby', this.status.id);
     if (column.type === 'number') input.inputMode = 'decimal';
     input.value = initial ?? this.model.rows[dataRow][column.field] ?? '';
-    this.editor = { input, cell: { ...cell }, dataRow, column };
+    this.editor = { input, cell: { ...cell }, dataRow, column, revision: this.model.revision, composing: false };
+    input.addEventListener('compositionstart', () => { if (this.editor?.input === input) this.editor.composing = true; });
+    input.addEventListener('compositionend', () => { if (this.editor?.input === input) { this.editor.composing = false; this.editor.compositionEnded = performance.now(); } });
     td.replaceChildren(input); input.focus(); if (initial == null) input.select();
     input.addEventListener('keydown', event => {
-      event.stopPropagation(); if (event.isComposing || event.keyCode === 229) return;
+      event.stopPropagation(); if (event.isComposing || event.keyCode === 229 || this.editor?.composing || (event.key === 'Enter' && performance.now() - (this.editor?.compositionEnded ?? -Infinity) < 30)) return;
       if (event.key === 'Escape') { event.preventDefault(); this.cancelEdit(); }
       else if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault(); const location = { ...this.current };
@@ -543,9 +611,11 @@ export class Grid {
   cancelEdit() { this.editor = null; this.render(); this.focusCell(); this.message('편집을 취소했습니다.'); }
   finishEdit() {
     if (!this.editor) return true;
+    if (this.editor.composing) return false;
+    if (this.editor.revision !== this.model.revision) { this.message('외부 데이터가 변경됐습니다. Esc로 취소하고 다시 입력하세요.', true); return false; }
     const { input, dataRow, column } = this.editor;
     let changes;
-    try { changes = this.model.apply([{ row: dataRow, field: column.field, value: input.value }], 'edit'); }
+    try { changes = this.mutateModel('apply', [{ row: dataRow, field: column.field, value: input.value }], 'edit'); }
     catch (error) { input.setAttribute('aria-invalid', 'true'); input.title = error.message; this.message(error.message, true); return false; }
     this.editor = null; this.changed(changes, 'edit'); return true;
   }
@@ -553,9 +623,15 @@ export class Grid {
   selectedChanges(valueFactory) {
     const range = this.getSelection(), changes = [];
     for (let row = range.top; row <= range.bottom && row < this.view.length; row++) {
-      for (let col = range.left; col <= range.right; col++) changes.push({ row: this.view[row].index, field: this.columns[col].field, value: valueFactory(row, col) });
+      for (let col = range.left; col <= range.right; col++) if (this.columns[col].editable !== false) changes.push({ row: this.view[row].index, field: this.columns[col].field, value: valueFactory(row, col) });
     }
     return changes;
+  }
+
+  copyRawSelection() {
+    const range = this.getSelection(), cells = [];
+    for (let row = range.top; row <= range.bottom && row < this.view.length; row++) cells.push(this.columns.slice(range.left, range.right + 1).map((column, x) => ({ row: this.view[row].index, col: this.model.columns.findIndex(item => item.field === column.field), value: this.model.rows[this.view[row].index][column.field] })));
+    return { version: 1, cells };
   }
 
   copySelection() {
@@ -565,7 +641,7 @@ export class Grid {
   }
 
   paste(text) {
-    if (this.editor || !this.model.editable) return false;
+    if (this.editor || !this.editable) return false;
     let applied, range, height, width;
     try {
       const matrix = Array.isArray(text) ? text : parseTSV(text), changes = [];
@@ -577,16 +653,16 @@ export class Grid {
       if (extra && !this.columns.slice(range.left, range.left + width).some(column => column.editable !== false)) throw new Error('읽기 전용 셀에는 행을 추가해 붙여넣을 수 없습니다.');
       if (extra && (this.options.pasteAppend === false || this.query.trim() || this.filters.length || this.groupBy.length || this.tree)) throw new Error('행 범위를 넘었습니다. 일반 모드에서 검색·필터를 해제하거나 행을 추가하세요.');
       if (extra) {
-        const candidate = this.getData(), originalCount = candidate.length;
+        const candidate = this.model.getData(), originalCount = candidate.length;
         for (let index = 0; index < extra; index++) candidate.push(this.makeRow({}, index));
         matrix.forEach((row, y) => row.forEach((value, x) => {
           const column = this.columns[range.left + x], target = this.view[range.top + y]?.index ?? originalCount + range.top + y - this.view.length;
           if (column.editable !== false) candidate[target][column.field] = this.model.convert(column, value);
         }));
-        applied = this.model.replaceRows(candidate, 'paste', false);
+        applied = this.mutateModel('replaceRows', candidate, 'paste', false);
       } else {
-        matrix.forEach((row, y) => row.forEach((value, x) => changes.push({ row: this.view[range.top + y].index, field: this.columns[range.left + x].field, value })));
-        applied = this.model.apply(changes, 'paste');
+        matrix.forEach((row, y) => row.forEach((value, x) => { if (this.columns[range.left + x].editable !== false) changes.push({ row: this.view[range.top + y].index, field: this.columns[range.left + x].field, value }); }));
+        applied = this.mutateModel('apply', changes, 'paste');
       }
     } catch (error) { this.message(error.message, true); return false; }
     this.anchor = { row: range.top, col: range.left }; this.current = { row: range.top + height - 1, col: range.left + width - 1 };
@@ -596,13 +672,13 @@ export class Grid {
   clearSelection() {
     if (this.editor) return;
     let changes;
-    try { changes = this.model.apply(this.selectedChanges(() => ''), 'clear'); }
+    try { changes = this.mutateModel('apply', this.selectedChanges(() => ''), 'clear'); }
     catch (error) { this.message(error.message, true); return; }
     this.changed(changes, 'clear');
   }
 
-  undo() { if (this.editor) this.cancelEdit(); else this.changed(this.model.undo(), 'undo'); }
-  redo() { if (!this.editor) this.changed(this.model.redo(), 'redo'); }
+  undo() { if (!this.editable) return; if (this.editor) this.cancelEdit(); else this.changed(this.mutateModel('undo'), 'undo'); }
+  redo() { if (this.editable && !this.editor) this.changed(this.mutateModel('redo'), 'redo'); }
   changed(changes, reason) {
     if (changes.length) this.dataRevision++;
     if (changes.length && (this.query.trim() || this.filters.length || this.sorts.length)) this.merges = [];
@@ -611,9 +687,10 @@ export class Grid {
     this.message(changes.length ? `${changes.some(change => change.kind === 'rows') ? '행 데이터' : changes.length + '셀'} ${reason === 'undo' ? '되돌림' : reason === 'redo' ? '다시 적용' : '변경'} · ${this.model.canUndo ? 'Ctrl+Z로 되돌리기' : '되돌릴 작업 없음'}` : '변경된 셀이 없습니다.');
     if (changes.length) this.options.onChange?.({ reason, changes, data: this.getData() });
   }
-  getData() { return this.model.getData(); }
+  getData({ raw = false } = {}) { return raw ? this.model.getData() : this.model.getComputedData(); }
+  mutateModel(method, ...args) { this.localWrite = true; try { return this.model[method](...args); } finally { this.localWrite = false; } }
   setSearch(query) { if (this.editor) this.cancelEdit(); this.query = String(query); this.search.value = this.query; this.merges = []; this.resetSelection(); this.render(); }
-  setData(rows) { this.model.setData(rows); this.dataRevision++; this.editor = null; this.merges = []; this.resetSelection(); this.render(); }
+  setData(rows) { this.mutateModel('setData', rows); this.dataRevision++; this.editor = null; this.merges = []; this.resetSelection(); this.render(); }
   downloadCSV() {
     if (this.editor && !this.finishEdit()) return;
     const quote = value => {
@@ -625,5 +702,5 @@ export class Grid {
     const blob = new Blob(['\uFEFF' + rows.map(row => row.map(quote).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
     this.downloadFile(blob, 'moa-grid.csv'); this.message('검색·정렬된 데이터를 CSV로 내보냈습니다.');
   }
-  destroy() { this.destroyed = true; this.editor = null; this.resizeObserver.disconnect(); this.events.abort(); this.root.remove(); }
+  destroy() { this.destroyed = true; this.editor = null; this.resizeObserver.disconnect(); this.unsubscribe?.(); cancelAnimationFrame(this.scrollFrame); this.events.abort(); this.root.remove(); }
 }

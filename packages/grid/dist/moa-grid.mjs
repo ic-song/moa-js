@@ -1,4 +1,154 @@
-/*! Moa JS Grid v0.2.0 | MIT License | See LICENSE */
+/*! Moa JS Grid v0.3.0 | MIT License | See LICENSE */
+// A bounded expression parser. No JavaScript evaluation or property access.
+class FormulaFault extends Error { constructor(code) { super(code); this.code = code; } }
+const fault = code => { throw new FormulaFault(code); };
+export const isFormula = value => typeof value === 'string' && value.startsWith('=');
+
+export function columnName(index) {
+  let result = '';
+  for (index++; index > 0; index = Math.floor((index - 1) / 26)) result = String.fromCharCode(65 + (index - 1) % 26) + result;
+  return result;
+}
+function reference(text) {
+  const match = /^(\$?)([A-Z]+)(\$?)([1-9]\d*)$/i.exec(text);
+  if (!match) return null;
+  let col = 0; for (const char of match[2].toUpperCase()) col = col * 26 + char.charCodeAt(0) - 64;
+  return { col: col - 1, row: Number(match[4]) - 1, fixedCol: !!match[1], fixedRow: !!match[3] };
+}
+function tokens(expression) {
+  if (expression.length > 4096) fault('#LIMIT!');
+  const output = []; let rest = expression.slice(1);
+  while (rest.length) {
+    const match = /^(\s+|"(?:[^"]|"")*"|(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?|\$?[A-Za-z_][A-Za-z_0-9$]*|<>|<=|>=|[+\-*/^&=<>():,%])/.exec(rest);
+    if (!match) fault('#PARSE!');
+    rest = rest.slice(match[0].length); if (!/^\s/.test(match[0])) output.push(match[0]);
+    if (output.length > 1024) fault('#LIMIT!');
+  }
+  return output;
+}
+const priorities = { '=': 1, '<>': 1, '<': 1, '>': 1, '<=': 1, '>=': 1, '&': 2, '+': 3, '-': 3, '*': 4, '/': 4, '^': 5 };
+function parseFormula(expression) {
+  const list = tokens(expression); let position = 0, depth = 0;
+  const parse = (minimum = 0) => {
+    if (++depth > 128) fault('#LIMIT!');
+    let token = list[position++], left;
+    if (token == null) fault('#PARSE!');
+    if (token === '+' || token === '-') left = { kind: 'unary', op: token, value: parse(5) };
+    else if (token === '(') { left = parse(); if (list[position++] !== ')') fault('#PARSE!'); }
+    else if (token.startsWith('"')) left = { kind: 'value', value: token.slice(1, -1).replace(/""/g, '"') };
+    else if (/^(?:\d|\.)/.test(token)) left = { kind: 'value', value: Number(token) };
+    else if (reference(token)) {
+      left = { kind: 'ref', ...reference(token) };
+      if (list[position] === ':') { position++; const end = reference(list[position++] || ''); if (!end) fault('#PARSE!'); left = { kind: 'range', start: left, end }; }
+    } else if (/^(TRUE|FALSE)$/i.test(token) && list[position] !== '(') left = { kind: 'value', value: token.toUpperCase() === 'TRUE' };
+    else if (list[position++] === '(') {
+      const args = [];
+      if (list[position] !== ')') do { args.push(parse()); if (list[position] !== ',') break; position++; } while (true);
+      if (list[position++] !== ')') fault('#PARSE!');
+      left = { kind: 'call', name: token.toUpperCase(), args };
+    } else fault('#NAME?');
+    while (list[position] === '%') { position++; left = { kind: 'binary', op: '/', left, right: { kind: 'value', value: 100 } }; }
+    while (priorities[list[position]] >= minimum) {
+      const op = list[position++], priority = priorities[op];
+      left = { kind: 'binary', op, left, right: parse(priority + (op === '^' ? 0 : 1)) };
+    }
+    depth--; return left;
+  };
+  const result = parse(); if (position !== list.length) fault('#PARSE!'); return result;
+}
+const scalar = value => { if (Array.isArray(value)) fault('#VALUE!'); return value; };
+const numeric = value => {
+  value = scalar(value); if (value === '' || value == null) return 0;
+  if (typeof value === 'boolean') return Number(value);
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  fault('#VALUE!');
+};
+const truth = value => { value = scalar(value); if (typeof value === 'string' && !/^(true|false)$/i.test(value)) fault('#VALUE!'); return typeof value === 'string' ? value.toLowerCase() === 'true' : !!value; };
+
+export class FormulaSheet {
+  constructor(rows, columns) { this.rows = rows; this.columns = columns; this.cache = new Map(); this.active = new Set(); this.parsed = new Map(); this.work = 0; }
+  cell(row, col) {
+    const key = `${row}:${col}`;
+    if (this.cache.has(key)) return this.cache.get(key);
+    const result = { value: null, error: null };
+    try {
+      if (row < 0 || col < 0 || row >= this.rows.length || col >= this.columns.length) fault('#REF!');
+      if (this.active.has(key)) fault('#CYCLE!');
+      if (this.active.size >= 128) fault('#LIMIT!');
+      const value = this.rows[row][this.columns[col].field];
+      if (!isFormula(value) || this.columns[col].formulas === false) result.value = value;
+      else {
+        this.active.add(key); const outerWork = this.work; if (this.active.size === 1) this.work = 0;
+        try {
+          let ast = this.parsed.get(value); if (!ast) { ast = parseFormula(value); if (this.parsed.size < 10000) this.parsed.set(value, ast); }
+          result.value = scalar(this.evaluate(ast));
+          if (typeof result.value === 'number' && !Number.isFinite(result.value)) fault('#NUM!');
+        } finally { this.active.delete(key); this.work = outerWork; }
+      }
+    } catch (error) { if (!(error instanceof FormulaFault)) throw error; result.value = result.error = error.code; }
+    // A cycle discovered deeper in the stack must propagate back through callers.
+    this.cache.set(key, result); return result;
+  }
+  evaluate(ast) {
+    const result = this.evaluateNode(ast);
+    if (typeof result === 'number' && !Number.isFinite(result)) fault('#NUM!');
+    return result;
+  }
+  evaluateNode(ast) {
+    if (++this.work > 100000) fault('#LIMIT!');
+    const read = ref => { const result = this.cell(ref.row, ref.col); if (result.error) fault(result.error); return result.value ?? ''; };
+    if (ast.kind === 'value') return ast.value;
+    if (ast.kind === 'ref') return read(ast);
+    if (ast.kind === 'range') {
+      const top = Math.min(ast.start.row, ast.end.row), bottom = Math.max(ast.start.row, ast.end.row), left = Math.min(ast.start.col, ast.end.col), right = Math.max(ast.start.col, ast.end.col);
+      if ((bottom - top + 1) * (right - left + 1) > 100000) fault('#LIMIT!');
+      const values = []; for (let row = top; row <= bottom; row++) for (let col = left; col <= right; col++) values.push(read({ row, col })); return values;
+    }
+    if (ast.kind === 'unary') return (ast.op === '-' ? -1 : 1) * numeric(this.evaluate(ast.value));
+    if (ast.kind === 'binary') {
+      const a = scalar(this.evaluate(ast.left)), b = scalar(this.evaluate(ast.right));
+      if (ast.op === '&') return String(a ?? '') + String(b ?? '');
+      if (['=', '<>', '<', '>', '<=', '>='].includes(ast.op)) {
+        const x = typeof a === 'string' ? a.toLocaleLowerCase() : a, y = typeof b === 'string' ? b.toLocaleLowerCase() : b;
+        return ({ '=': () => x === y, '<>': () => x !== y, '<': () => x < y, '>': () => x > y, '<=': () => x <= y, '>=': () => x >= y })[ast.op]();
+      }
+      const x = numeric(a), y = numeric(b);
+      if (ast.op === '/' && y === 0) fault('#DIV/0!');
+      return ({ '+': () => x + y, '-': () => x - y, '*': () => x * y, '/': () => x / y, '^': () => x ** y })[ast.op]();
+    }
+    const { name, args } = ast;
+    if (name === 'IF') { if (args.length < 2 || args.length > 3) fault('#VALUE!'); return truth(this.evaluate(args[0])) ? this.evaluate(args[1]) : args[2] ? this.evaluate(args[2]) : false; }
+    const functions = ['SUM', 'AVERAGE', 'MIN', 'MAX', 'COUNT', 'COUNTA', 'AND', 'OR', 'NOT', 'ABS', 'ROUND', 'CONCAT'];
+    if (!functions.includes(name)) fault('#NAME?');
+    const values = args.flatMap(arg => { const value = this.evaluate(arg); return Array.isArray(value) ? value : [value]; });
+    const numbers = values.filter(value => typeof value === 'number');
+    if (name === 'SUM') return numbers.reduce((a, b) => a + b, 0);
+    if (name === 'AVERAGE') { if (!numbers.length) fault('#DIV/0!'); return numbers.reduce((a, b) => a + b, 0) / numbers.length; }
+    if (name === 'MIN' || name === 'MAX') return numbers.length ? numbers.reduce((a, b) => name === 'MIN' ? Math.min(a, b) : Math.max(a, b)) : 0;
+    if (name === 'COUNT') return numbers.length;
+    if (name === 'COUNTA') return values.filter(value => value !== '' && value != null).length;
+    if (name === 'CONCAT') return values.map(value => value ?? '').join('');
+    if (name === 'AND' || name === 'OR') { if (!values.length) fault('#VALUE!'); const bools = values.map(truth); return name === 'AND' ? bools.every(Boolean) : bools.some(Boolean); }
+    if (name === 'NOT' || name === 'ABS') { if (args.length !== 1 || values.length !== 1) fault('#VALUE!'); return name === 'NOT' ? !truth(values[0]) : Math.abs(numeric(values[0])); }
+    if (args.length !== 2 || values.length !== 2) fault('#VALUE!');
+    const digits = numeric(values[1]); if (!Number.isInteger(digits) || Math.abs(digits) > 15) fault('#NUM!');
+    const number = numeric(values[0]), factor = 10 ** digits; return Math.sign(number) * Math.round((Math.abs(number) + Number.EPSILON) * factor) / factor;
+  }
+  getData() { return this.rows.map((row, r) => Object.fromEntries(Object.entries(row).map(([field, value]) => { const col = this.columns.findIndex(column => column.field === field); return [field, col < 0 ? value : this.cell(r, col).value]; }))); }
+}
+
+// Strings are tokenized first, so references inside quoted text remain untouched.
+export function translateFormula(expression, rowDelta, colDelta, { absolute = false } = {}) {
+  if (!isFormula(expression)) return expression;
+  return '=' + tokens(expression).map(token => {
+    const ref = reference(token); if (!ref) return token;
+    const row = ref.row + (absolute || !ref.fixedRow ? rowDelta : 0), col = ref.col + (absolute || !ref.fixedCol ? colDelta : 0);
+    if (row < 0 || col < 0 || !Number.isSafeInteger(row) || !Number.isSafeInteger(col)) throw new Error('수식 참조가 범위를 벗어납니다.');
+    return `${ref.fixedCol ? '$' : ''}${columnName(col)}${ref.fixedRow ? '$' : ''}${row + 1}`;
+  }).join('');
+}
+
+
 export function parseTSV(text) {
   const rows = [[]];
   let value = '', quoted = false;
@@ -32,7 +182,7 @@ export function toTSV(rows) {
 }
 
 export class GridModel {
-  constructor(columns, rows = [], { editable = true, historyLimit = 100 } = {}) {
+  constructor(columns, rows = [], { editable = true, historyLimit = 100, formulas = false } = {}) {
     if (!Array.isArray(columns) || !columns.length) throw new Error('컬럼이 필요합니다.');
     const keys = columns.map(column => column.field);
     if (keys.some(key => typeof key !== 'string' || !key || ['__proto__', 'constructor', 'prototype'].includes(key)) || new Set(keys).size !== keys.length) {
@@ -42,6 +192,7 @@ export class GridModel {
     this.columns = columns.map(column => ({ ...column }));
     this.editable = editable;
     this.historyLimit = historyLimit;
+    this.formulas = !!formulas; this.revision = 0; this.listeners = new Set();
     this.setData(rows);
   }
 
@@ -50,13 +201,34 @@ export class GridModel {
     this.validateRows?.(rows);
     this.rows = rows.map(row => ({ ...row }));
     this.past = []; this.future = [];
+    this.touch('reset', []);
   }
 
   getData() { return this.rows.map(row => ({ ...row })); }
+  getComputedData() { return this.formulas ? this.formulaSheet().getData() : this.getData(); }
+  formulaSheet() { return this.sheet ||= new FormulaSheet(this.rows, this.columns); }
+  subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  touch(reason, changes) {
+    this.revision++; this.sheet = null;
+    for (const listener of this.listeners) {
+      try { listener({ reason, changes, revision: this.revision }); }
+      catch (error) { queueMicrotask(() => { throw error; }); }
+    }
+  }
+  validateFormulas(rows) {
+    if (!this.formulas) return;
+    const sheet = new FormulaSheet(rows, this.columns);
+    rows.forEach((row, r) => this.columns.forEach((column, c) => {
+      if (!isFormula(row[column.field]) || column.formulas === false) return;
+      const result = sheet.cell(r, c);
+      if (!result.error) this.convert({ ...column, formulas: false }, result.value);
+    }));
+  }
   get canUndo() { return this.past.length > 0; }
   get canRedo() { return this.future.length > 0; }
 
   convert(column, value) {
+    if (this.formulas && column.formulas !== false && isFormula(value)) return value;
     if (value === '' || value == null) {
       if (column.required) throw new Error(`${column.header || column.field}: 필수 값입니다.`);
       return column.type === 'number' || column.type === 'boolean' ? null : '';
@@ -92,13 +264,14 @@ export class GridModel {
     }
     // Validate the entire transaction before changing any cell.
     if (!transaction.length) return [];
-    if (this.validateRows) {
+    if (this.validateRows || this.formulas) {
       const candidate = this.getData();
       for (const change of transaction) candidate[change.row][change.field] = change.value;
-      this.validateRows(candidate);
+      this.validateRows?.(candidate); this.validateFormulas(candidate);
     }
     for (const change of transaction) this.rows[change.row][change.field] = change.value;
     this.remember({ changes: transaction, reason });
+    this.touch(reason, transaction);
     return transaction.map(change => ({ ...change }));
   }
 
@@ -114,10 +287,12 @@ export class GridModel {
     const next = rows.map(row => ({ ...row }));
     if (validate) for (const row of next) for (const column of this.columns) row[column.field] = this.convert(column, row[column.field]);
     this.validateRows?.(next);
+    this.validateFormulas(next);
     const before = this.getData();
     if (JSON.stringify(before) === JSON.stringify(next)) return [];
     this.rows = next;
     this.remember({ reason, before, after: this.getData() });
+    this.touch(reason, [{ kind: 'rows' }]);
     return [{ kind: 'rows', row: -1, field: null, previous: before.map(row => ({ ...row })), value: this.getData() }];
   }
 
@@ -138,10 +313,12 @@ export class GridModel {
     if (!entry) return [];
     if (entry.before) {
       this.rows = entry.before.map(row => ({ ...row })); this.future.push(entry);
+      this.touch('undo', [{ kind: 'rows' }]);
       return [{ kind: 'rows', row: -1, field: null, previous: entry.after.map(row => ({ ...row })), value: this.getData() }];
     }
     for (const change of entry.changes) this.rows[change.row][change.field] = change.previous;
     this.future.push(entry);
+    this.touch('undo', entry.changes);
     return entry.changes.map(change => ({ ...change, value: change.previous, previous: change.value }));
   }
 
@@ -150,10 +327,12 @@ export class GridModel {
     if (!entry) return [];
     if (entry.after) {
       this.rows = entry.after.map(row => ({ ...row })); this.past.push(entry);
+      this.touch('redo', [{ kind: 'rows' }]);
       return [{ kind: 'rows', row: -1, field: null, previous: entry.before.map(row => ({ ...row })), value: this.getData() }];
     }
     for (const change of entry.changes) this.rows[change.row][change.field] = change.value;
     this.past.push(entry);
+    this.touch('redo', entry.changes);
     return entry.changes.map(change => ({ ...change }));
   }
 }
@@ -306,7 +485,8 @@ export function parseClipboardHTML(html, numericColumns = new Set()) {
   return width ? output.map(row => Array.from({ length: width }, (_, col) => row[col] ?? '')) : null;
 }
 
-export function readXLSX(bytes, library, columns, { sheetName, header = true } = {}) {
+
+export function readXLSX(bytes, library, columns, { sheetName, header = true, formulas = false } = {}) {
   if (!library?.read) throw new Error('XLSX 모듈이 준비되지 않았습니다.');
   const signature = ArrayBuffer.isView(bytes) ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) : new Uint8Array(bytes);
   if (signature[0] !== 0x50 || signature[1] !== 0x4b) throw new Error('올바른 XLSX 파일이 아닙니다.');
@@ -329,31 +509,63 @@ export function readXLSX(bytes, library, columns, { sheetName, header = true } =
   });
   if (new Set(mappings.filter(index => index >= 0)).size !== mappings.filter(index => index >= 0).length) throw new Error('서로 다른 컬럼이 같은 시트 헤더에 연결됩니다.');
   if (header && mappings.every(index => index === -1)) throw new Error('시트의 첫 행에 일치하는 컬럼명이 없습니다.');
+  if (formulas && (bounds.s.r !== 0 || bounds.s.c !== 0 || mappings.some((col, index) => col !== index))) throw new Error('수식 가져오기는 A1부터 시작하는 동일한 컬럼 순서의 시트가 필요합니다.');
   const rows = [];
   for (let row = bounds.s.r + (header ? 1 : 0); row <= bounds.e.r; row++) {
     const item = {}; let populated = false;
     columns.forEach((column, index) => {
       const cell = mappings[index] < 0 ? null : sheet[library.utils.encode_cell({ r: row, c: mappings[index] })];
-      if (cell?.t === 'e') throw new Error(`${row + 1}행 ${column.header || column.field}: Excel 오류 셀입니다.`);
-      if (cell?.f && cell.v == null) throw new Error(`${row + 1}행 ${column.header || column.field}: 수식 계산 결과가 없습니다. Excel에서 계산·저장 후 가져오세요.`);
+      if (cell?.t === 'e' && !(formulas && cell.f)) throw new Error(`${row + 1}행 ${column.header || column.field}: Excel 오류 셀입니다.`);
+      if (cell?.f && cell.v == null && !formulas) throw new Error(`${row + 1}행 ${column.header || column.field}: 수식 계산 결과가 없습니다. Excel에서 계산·저장 후 가져오세요.`);
       if (cell && cell.v != null && cell.v !== '') populated = true;
       let value = cell ? (column.type === 'number' || column.type === 'boolean' ? cell.v : display(cell)) : '';
+      if (formulas && cell?.f) { value = translateFormula('=' + cell.f, header ? -1 : 0, 0, { absolute: true }); populated = true; }
       if (value instanceof Date) value = `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
       item[column.field] = value;
     });
-    if (populated) rows.push(item);
+    if (populated || formulas) rows.push(item);
   }
   return rows;
 }
 
-export function writeXLSX(rows, library, columns, { sheetName = '데이터', merges = [] } = {}) {
+export function writeXLSX(rows, library, columns, { sheetName = '데이터', merges = [], formulas = false } = {}) {
   if (!library?.write) throw new Error('XLSX 모듈이 준비되지 않았습니다.');
-  const values = [columns.map(column => column.header || column.field), ...rows.map(row => columns.map(column => row[column.field] ?? ''))];
+  const formulaSheet = formulas ? new FormulaSheet(rows, columns) : null;
+  const values = [columns.map(column => column.header || column.field), ...rows.map((row, r) => columns.map((column, c) => {
+    const value = row[column.field] ?? '';
+    if (!formulas || column.formulas === false || !isFormula(value)) return value;
+    const computed = formulaSheet.cell(r, c); if (computed.error) throw new Error(`${r + 1}행 ${column.header || column.field}: ${computed.error}`);
+    return { f: translateFormula(value, 1, 0, { absolute: true }).slice(1), v: computed.value ?? '', t: typeof computed.value === 'number' ? 'n' : typeof computed.value === 'boolean' ? 'b' : 's' };
+  }))];
   const sheet = library.utils.aoa_to_sheet(values);
   sheet['!cols'] = columns.map(column => ({ wch: Math.max(10, Math.round((column.width || 140) / 8)) }));
   sheet['!merges'] = merges.map(merge => ({ s: { r: merge.row + 1, c: merge.col }, e: { r: merge.row + merge.rowSpan, c: merge.col + merge.colSpan - 1 } }));
   const book = library.utils.book_new(); library.utils.book_append_sheet(book, sheet, sheetName);
   return library.write(book, { type: 'array', bookType: 'xlsx', compression: true });
+}
+
+export function virtualWindow(count, scrollTop, height, rowHeight = 48, overscan = 5) {
+  const start = Math.max(0, Math.min(count, Math.floor(Math.max(0, scrollTop) / rowHeight) - overscan));
+  const end = Math.min(count, Math.max(start, Math.ceil((Math.max(0, scrollTop) + height) / rowHeight) + overscan));
+  return { start, end, before: start * rowHeight, after: (count - end) * rowHeight };
+}
+
+export function columnWindow(columns, scrollLeft, width, frozen = 0, virtual = true) {
+  const widths = columns.map(column => Math.max(64, Math.min(1000, Number(column.width) || 140)));
+  const offsets = [48]; for (const size of widths) offsets.push(offsets.at(-1) + size);
+  let start = frozen, end = columns.length;
+  if (virtual) {
+    const fixed = offsets[frozen];
+    while (start < columns.length && offsets[start + 1] < scrollLeft + fixed) start++;
+    end = start; while (end < columns.length && offsets[end] < scrollLeft + width) end++;
+    start = Math.max(frozen, start - 2); end = Math.min(columns.length, Math.max(start + 1, end + 2));
+  }
+  const slots = [];
+  for (let col = 0; col < frozen; col++) slots.push({ col, width: widths[col] });
+  if (start > frozen) slots.push({ gap: true, width: offsets[start] - offsets[frozen] });
+  for (let col = start; col < end; col++) slots.push({ col, width: widths[col] });
+  if (end < columns.length) slots.push({ gap: true, width: offsets.at(-1) - offsets[end] });
+  return { slots, offsets, total: offsets.at(-1) };
 }
 
 
@@ -371,8 +583,9 @@ export class Grid {
     this.host = typeof target === 'string' ? document.querySelector(target) : target;
     if (!this.host || this.host.childNodes.length) throw new Error('비어 있는 그리드 컨테이너가 필요합니다.');
     this.options = options;
-    this.model = new GridModel(options.columns, options.data || [], options);
-    this.columns = this.model.columns;
+    this.model = options.model || new GridModel(options.columns, options.data || [], options);
+    this.columns = options.model ? options.columns.map(column => ({ ...column })) : this.model.columns;
+    this.virtual = options.virtual !== false; this.rowHeight = 48;
     this.anchor = { row: 0, col: 0 }; this.current = { ...this.anchor };
     this.query = ''; this.sorts = []; this.filters = []; this.filterLogic = 'and'; this.groupBy = []; this.tree = null;
     this.collapsedGroups = new Set(); this.collapsedNodes = new Set(); this.merges = []; this.mergeOwners = new Map();
@@ -405,7 +618,7 @@ export class Grid {
     this.fileInput.addEventListener('change', async () => { const file = this.fileInput.files[0]; if (file) await this.importXLSX(file); this.fileInput.value = ''; }, { signal });
     this.importButton = button('XLSX 가져오기', () => this.fileInput.click());
     this.exportButton = button('XLSX 내보내기', () => this.exportXLSX());
-    this.importButton.disabled = !this.xlsx || !this.model.editable; this.exportButton.disabled = !this.xlsx;
+    this.importButton.disabled = !this.xlsx || !this.editable; this.exportButton.disabled = !this.xlsx;
     const frozenLabel = node('label', '고정 열 ', 'moa-grid__option'); this.frozenSelect = node('select');
     this.frozenSelect.setAttribute('aria-label', '고정 열');
     for (let count = 0; count <= this.columns.length; count++) { const option = node('option', count ? `${count}열` : '없음'); option.value = count; this.frozenSelect.append(option); }
@@ -426,8 +639,8 @@ export class Grid {
     this.root.append(this.toolbar, this.filterPanel, this.viewport, this.status, this.fileInput); this.host.append(this.root);
     this.table.addEventListener('keydown', event => this.onKey(event), { signal });
     this.table.addEventListener('dblclick', event => { const cell = this.cellAt(event.target); if (cell) this.startEdit(cell); }, { signal });
-    this.table.addEventListener('compositionstart', event => {
-      if (!this.editor) { const cell = this.cellAt(event.target); if (cell) this.startEdit(cell); }
+    this.table.addEventListener('beforeinput', event => {
+      if (!this.editor && event.inputType === 'insertCompositionText') { const cell = this.cellAt(event.target); if (cell) this.startEdit(cell, ''); }
     }, { signal });
     this.table.addEventListener('pointerdown', event => {
       if (event.button !== 0 || this.editor?.input.contains(event.target)) return;
@@ -445,10 +658,22 @@ export class Grid {
       this.setColumnWidth(this.resizing.field, this.resizing.width + event.clientX - this.resizing.x);
     }, { signal });
     document.addEventListener('pointerup', () => { this.resizing = null; }, { signal });
-    this.resizeObserver = new ResizeObserver(() => this.updateColumnGeometry()); this.resizeObserver.observe(this.viewport);
+    this.viewport.addEventListener('scroll', () => {
+      if (!this.virtualActive || this.editor) return;
+      if (!this.scrollFrame) this.scrollFrame = requestAnimationFrame(() => { this.scrollFrame = 0; if (!this.destroyed && !this.editor) this.renderViewport(); });
+    }, { signal });
+    this.unsubscribe = this.model.subscribe(() => {
+      if (this.localWrite || this.destroyed) return;
+      this.dataRevision++;
+      if (this.editor) { this.message('외부 데이터가 변경됐습니다. 편집을 취소하고 다시 입력하세요.', true); return; }
+      this.merges = []; this.render();
+    });
+    this.resizeObserver = new ResizeObserver(() => { if (this.virtualActive && !this.editor) this.renderViewport(); else this.updateColumnGeometry(); }); this.resizeObserver.observe(this.viewport);
     this.table.addEventListener('copy', event => {
       if (this.editor || !event.clipboardData || !this.view.length) return;
-      event.clipboardData.setData('text/plain', this.copySelection()); event.preventDefault();
+      event.clipboardData.setData('text/plain', this.copySelection());
+      if (this.model.formulas) event.clipboardData.setData('application/x-moa-grid', JSON.stringify(this.copyRawSelection()));
+      event.preventDefault();
       this.message('선택 영역을 복사했습니다. 엑셀에 붙여넣을 수 있습니다.');
     }, { signal });
     this.table.addEventListener('paste', event => {
@@ -460,7 +685,17 @@ export class Grid {
         const left = this.getSelection().left;
         const numeric = new Set(this.columns.slice(left).map((column, index) => column.type === 'number' ? index : -1));
         const matrix = parseClipboardData(plain, html, numeric);
-        this.paste(matrix);
+        const own = event.clipboardData.getData('application/x-moa-grid');
+        if (own && this.model.formulas) {
+          const payload = JSON.parse(own);
+          if (payload.version !== 1 || !Array.isArray(payload.cells)) throw new Error('수식 클립보드 형식이 올바르지 않습니다.');
+          const top = this.getSelection().top;
+          const translated = payload.cells.map((row, y) => row.map((cell, x) => {
+            if (!cell || !Number.isInteger(cell.row) || !Number.isInteger(cell.col)) throw new Error('수식 클립보드 좌표가 올바르지 않습니다.');
+            return translateFormula(cell.value, (this.view[top + y]?.index ?? this.model.rows.length + top + y - this.view.length) - cell.row, this.model.columns.findIndex(item => item.field === this.columns[left + x]?.field) - cell.col);
+          }));
+          this.paste(translated);
+        } else this.paste(matrix);
       } catch (error) { this.message(error.message, true); }
     }, { signal });
     try {
@@ -470,6 +705,8 @@ export class Grid {
       if (options.groupBy) this.setGroupBy(options.groupBy);
     } catch (error) { this.destroy(); throw error; }
   }
+
+  get editable() { return this.model.editable && this.options.editable !== false; }
 
   cellAt(target) {
     const cell = target.closest?.('td[data-row]');
@@ -504,6 +741,19 @@ export class Grid {
   }
 
   focusCell() {
+    if (this.virtualActive && this.view.length) {
+      const index = this.displayIndex.get(this.current.row), top = index * this.rowHeight;
+      if (this.virtualRows) {
+        if (top < this.viewport.scrollTop) this.viewport.scrollTop = top;
+        else if (top + this.rowHeight + 56 > this.viewport.scrollTop + this.viewport.clientHeight) this.viewport.scrollTop = top + this.rowHeight + 56 - this.viewport.clientHeight;
+      }
+      const layout = columnWindow(this.columns, 0, 0, this.frozenColumns, false), left = layout.offsets[this.current.col], right = layout.offsets[this.current.col + 1];
+      if (this.current.col >= this.frozenColumns) {
+        if (left < this.viewport.scrollLeft + layout.offsets[this.frozenColumns]) this.viewport.scrollLeft = left - layout.offsets[this.frozenColumns];
+        else if (right > this.viewport.scrollLeft + this.viewport.clientWidth) this.viewport.scrollLeft = right - this.viewport.clientWidth;
+      }
+      this.renderViewport();
+    }
     const cell = this.cellElement(this.current);
     if (!cell) { this.table.focus({ preventScroll: true }); return; }
     cell.focus({ preventScroll: true });
@@ -532,18 +782,36 @@ export class Grid {
   }
 
   render() {
-    const result = buildDisplay(this.model.rows, this); this.view = result.view; this.display = result.display;
+    const result = buildDisplay(this.model.formulas ? this.model.getComputedData() : this.model.rows, this); this.view = result.view; this.display = result.display;
+    this.virtualRows = this.virtual && this.display.length > 200; this.virtualCols = this.virtual && this.columns.length > 30;
+    this.virtualActive = this.virtualRows || this.virtualCols;
+    if (this.virtualActive) this.merges = [];
+
+    this.root.classList.toggle('moa-grid--virtual', this.virtualActive);
+    this.displayIndex = new Map(); this.display.forEach((entry, index) => { if (entry.type === 'data') this.displayIndex.set(entry.viewIndex, index); });
+    this.renderViewport();
+  }
+
+  renderViewport() {
+    if (this.editor) return;
+    const window = this.virtualRows ? virtualWindow(this.display.length, this.viewport.scrollTop, this.viewport.clientHeight || 530, this.rowHeight) : { start: 0, end: this.display.length, before: 0, after: 0 };
+    this.layout = columnWindow(this.columns, this.viewport.scrollLeft, this.viewport.clientWidth || 800, this.frozenColumns, this.virtualCols);
+    const slots = this.layout.slots;
+    const hadFocus = this.table.contains(document.activeElement);
+    const focusedCell = this.cellAt(document.activeElement);
     this.mergeOwners = new Map();
     for (const merge of this.merges) for (let row = merge.row; row < merge.row + merge.rowSpan; row++) for (let col = merge.col; col < merge.col + merge.colSpan; col++) this.mergeOwners.set(`${row}:${col}`, merge);
     this.table.replaceChildren();
     const colgroup = node('colgroup'); colgroup.append(node('col'));
-    for (const column of this.columns) { const col = node('col'); col.dataset.field = column.field; colgroup.append(col); }
+    for (const slot of slots) { const col = node('col'); col.style.width = `${slot.width}px`; if (!slot.gap) col.dataset.field = this.columns[slot.col].field; colgroup.append(col); }
     this.table.append(colgroup);
-    this.table.setAttribute('aria-rowcount', String(this.view.length + 1)); this.table.setAttribute('aria-colcount', String(this.columns.length + 1));
+    this.table.setAttribute('aria-rowcount', String(this.display.length + 1)); this.table.setAttribute('aria-colcount', String(this.columns.length + 1));
     const head = node('thead'), heading = node('tr'), corner = node('th', '#'); corner.scope = 'col'; heading.append(corner);
-    this.columns.forEach((column, col) => {
+    slots.forEach(slot => {
+      if (slot.gap) { const gap = node('th'); gap.setAttribute('aria-hidden', 'true'); gap.className = 'moa-grid__gap'; heading.append(gap); return; }
+      const col = slot.col, column = this.columns[col];
       const th = node('th'); th.scope = 'col';
-      th.dataset.col = col;
+      th.dataset.col = col; th.setAttribute('aria-colindex', String(col + 2));
       const sortIndex = this.sorts.findIndex(sort => sort.field === column.field), sorted = this.sorts[sortIndex];
       th.setAttribute('aria-sort', sorted ? sortIndex ? 'other' : sorted.direction === 1 ? 'ascending' : 'descending' : 'none');
       const control = node('button', `${column.header || column.field}${column.editable === false ? ' (읽기 전용)' : ''}${sorted ? `${sorted.direction === 1 ? ' ↑' : ' ↓'}${this.sorts.length > 1 ? ' ' + (sortIndex + 1) : ''}` : ''}`);
@@ -562,18 +830,25 @@ export class Grid {
     });
     head.append(heading); this.table.append(head);
     const body = node('tbody');
-    for (const descriptor of this.display) {
-      if (descriptor.type !== 'data') { body.append(this.renderGroup(descriptor)); continue; }
+    const spacer = height => { if (!height) return; const tr = node('tr'), td = node('td'); tr.setAttribute('aria-hidden', 'true'); tr.className = 'moa-grid__spacer'; td.colSpan = slots.length + 1; td.style.height = `${height}px`; tr.append(td); body.append(tr); };
+    spacer(window.before);
+    for (let displayRow = window.start; displayRow < window.end; displayRow++) {
+      const descriptor = this.display[displayRow];
+      if (descriptor.type !== 'data') { const group = this.renderGroup(descriptor); group.setAttribute('aria-rowindex', String(displayRow + 2)); body.append(group); continue; }
       const { item: { row, ...item }, viewIndex: rowIndex } = descriptor;
       const tr = node('tr'), index = node('th', String(rowIndex + 1)); index.scope = 'row'; tr.append(index);
-      this.columns.forEach((column, col) => {
+      tr.setAttribute('aria-rowindex', String(displayRow + 2));
+      slots.forEach(slot => {
+        if (slot.gap) { const gap = node('td'); gap.setAttribute('aria-hidden', 'true'); gap.className = 'moa-grid__gap'; tr.append(gap); return; }
+        const col = slot.col, column = this.columns[col];
         const owner = this.mergeOwners.get(`${rowIndex}:${col}`);
         if (owner && (owner.row !== rowIndex || owner.col !== col)) return;
         const td = node('td', row[column.field] == null ? '' : String(row[column.field]));
         if (owner) { td.rowSpan = owner.rowSpan; td.colSpan = owner.colSpan; }
-        td.dataset.row = rowIndex; td.dataset.col = col;
+        td.dataset.row = rowIndex; td.dataset.col = col; td.setAttribute('aria-colindex', String(col + 2));
+        if (this.model.formulas) { const result = this.model.formulaSheet().cell(item.index, this.model.columns.findIndex(item => item.field === column.field)); if (result.error) { td.classList.add('is-formula-error'); td.title = result.error; } }
         td.setAttribute('aria-label', `${rowIndex + 1}행 ${column.header || column.field}`);
-        const readonly = !this.model.editable || column.editable === false;
+        const readonly = !this.editable || column.editable === false;
         td.setAttribute('aria-readonly', String(readonly)); td.classList.toggle('is-readonly', readonly);
         if (column.type === 'number') td.classList.add('is-number');
         if (this.tree && column.field === this.tree.labelField) {
@@ -589,16 +864,20 @@ export class Grid {
         tr.append(td);
       }); body.append(tr);
     }
+    spacer(window.after);
     if (!this.display.length) {
-      const tr = node('tr'), td = node('td', '표시할 데이터가 없습니다. 검색어를 지워보세요.', 'moa-grid__empty'); td.colSpan = this.columns.length + 1; tr.append(td); body.append(tr);
+      const tr = node('tr'), td = node('td', '표시할 데이터가 없습니다. 검색어를 지워보세요.', 'moa-grid__empty'); td.colSpan = slots.length + 1; tr.append(td); body.append(tr);
     }
     this.table.append(body);
-    this.table.tabIndex = this.view.length ? -1 : 0;
+    this.table.tabIndex = this.view.length && this.cellElement(this.current) ? -1 : 0;
     this.updateColumnGeometry();
     this.current.row = Math.max(0, Math.min(this.current.row, this.view.length - 1)); this.anchor.row = Math.max(0, Math.min(this.anchor.row, this.view.length - 1));
-    this.undoButton.disabled = !this.model.canUndo; this.redoButton.disabled = !this.model.canRedo;
-    this.addButton.disabled = !this.model.editable; this.removeButton.disabled = !this.model.editable || !this.view.length;
-    this.paintSelection(); this.message(`${this.view.length}행 · 셀 더블클릭 또는 F2로 편집`);
+    this.undoButton.disabled = !this.editable || !this.model.canUndo; this.redoButton.disabled = !this.editable || !this.model.canRedo;
+    this.addButton.disabled = !this.editable; this.removeButton.disabled = !this.editable || !this.view.length;
+    this.importButton.disabled = !this.xlsx || !this.editable;
+    this.paintSelection();
+    if (hadFocus && focusedCell) (this.cellElement(focusedCell) || this.table).focus({ preventScroll: true });
+    this.message(`${this.view.length}행${this.virtualActive ? ' · 가상 스크롤' : ''} · 셀 더블클릭 또는 F2로 편집`);
   }
 
   message(text, error = false) { this.status.textContent = text; this.status.classList.toggle('is-error', error); }
@@ -669,34 +948,28 @@ export class Grid {
   setColumnWidth(field, width) {
     const column = this.columns.find(column => column.field === field);
     if (!column || !Number.isFinite(Number(width))) throw new Error('올바른 컬럼과 너비가 필요합니다.');
-    column.width = Math.max(64, Math.min(1000, Math.round(Number(width)))); this.updateColumnGeometry();
+    column.width = Math.max(64, Math.min(1000, Math.round(Number(width)))); if (this.virtualActive && !this.editor) this.renderViewport(); else this.updateColumnGeometry();
     this.options.onColumnResize?.({ field, width: column.width });
   }
 
   setFrozenColumns(count) {
     if (!Number.isInteger(count) || count < 0 || count > this.columns.length) throw new Error('고정 열 수가 올바르지 않습니다.');
-    const widths = [...this.table.querySelectorAll('thead tr:first-child > th')].slice(0, count + 1).reduce((sum, header) => sum + header.getBoundingClientRect().width, 0);
+    const widths = columnWindow(this.columns, 0, 0, count, false).offsets[count];
     if (count && widths > this.viewport.clientWidth - 64) { this.frozenSelect.value = this.frozenColumns; this.message('고정 영역이 화면보다 큽니다. 고정할 열 수를 줄이세요.', true); return false; }
     if (this.editor && !this.finishEdit()) { this.frozenSelect.value = this.frozenColumns; return false; }
     this.frozenColumns = count; this.frozenSelect.value = count; this.merges = []; this.render(); return true;
   }
 
   updateColumnGeometry() {
+    const layout = columnWindow(this.columns, this.viewport.scrollLeft, this.viewport.clientWidth || 800, this.frozenColumns, this.virtualCols);
     const cols = this.table.querySelectorAll('colgroup col'); if (!cols.length) return;
-    cols[0].style.width = '48px'; let total = 48;
-    this.columns.forEach((column, index) => {
-      const width = Math.max(64, Math.min(1000, Number(column.width) || 140));
-      cols[index + 1].style.width = `${width}px`; total += width;
-      this.table.querySelector(`thead th[data-col="${index}"] [role=separator]`)?.setAttribute('aria-valuenow', String(width));
-    });
-    this.table.style.width = `${total}px`;
-    const heads = this.table.querySelectorAll('thead tr:first-child > th'); let offset = heads[0]?.getBoundingClientRect().width || 48;
-    for (let col = 0; col < this.columns.length; col++) {
-      const elements = this.table.querySelectorAll(`th[data-col="${col}"],td[data-col="${col}"]`);
-      for (const cell of elements) {
-        cell.classList.toggle('is-frozen', col < this.frozenColumns); cell.style.left = col < this.frozenColumns ? `${offset}px` : '';
-      }
-      offset += heads[col + 1]?.getBoundingClientRect().width || 0;
+    cols[0].style.width = '48px';
+    layout.slots.forEach((slot, index) => { if (cols[index + 1]) cols[index + 1].style.width = `${slot.width}px`; });
+    this.table.style.width = `${layout.total}px`;
+    for (const cell of this.table.querySelectorAll('[data-col]')) {
+      const col = Number(cell.dataset.col), frozen = col < this.frozenColumns;
+      cell.classList.toggle('is-frozen', frozen); cell.style.left = frozen ? `${layout.offsets[col]}px` : '';
+      cell.querySelector('[role=separator]')?.setAttribute('aria-valuenow', String(layout.offsets[col + 1] - layout.offsets[col]));
     }
   }
 
@@ -715,14 +988,14 @@ export class Grid {
   renderGroup(descriptor) {
     const row = node('tr', null, descriptor.type === 'group' ? 'moa-grid__group' : 'moa-grid__subtotal'), group = descriptor.group;
     if (descriptor.type === 'group') {
-      const cell = node('td'); cell.colSpan = this.columns.length + 1;
+      const cell = node('td'); cell.colSpan = this.layout.slots.length + 1;
       const column = this.columns.find(column => column.field === group.field);
       const toggle = node('button', `${group.expanded ? '−' : '+'} ${column.header || group.field}: ${group.value === '' ? '(빈 값)' : group.value} · ${group.count}행`); toggle.type = 'button'; toggle.dataset.groupKey = group.key; toggle.style.paddingInlineStart = `${12 + group.depth * 18}px`; toggle.setAttribute('aria-expanded', String(group.expanded));
       toggle.addEventListener('click', () => { if (this.collapsedGroups.has(group.key)) this.collapsedGroups.delete(group.key); else this.collapsedGroups.add(group.key); this.resetSelection(); this.render(); [...this.table.querySelectorAll('[data-group-key]')].find(button => button.dataset.groupKey === group.key)?.focus(); });
       cell.append(toggle); row.append(cell);
     } else {
       const index = node('th', 'Σ'); index.scope = 'row'; row.append(index);
-      this.columns.forEach((column, col) => { const cell = node('td', column.type === 'number' ? String(group.summary[column.field]) : col === 0 ? '소계' : ''); cell.dataset.col = col; if (column.type === 'number') cell.classList.add('is-number'); row.append(cell); });
+      this.layout.slots.forEach(slot => { if (slot.gap) { const gap = node('td'); gap.className = 'moa-grid__gap'; gap.setAttribute('aria-hidden', 'true'); row.append(gap); return; } const col = slot.col, column = this.columns[col]; const cell = node('td', column.type === 'number' ? String(group.summary[column.field]) : col === 0 ? '소계' : ''); cell.dataset.col = col; if (column.type === 'number') cell.classList.add('is-number'); row.append(cell); });
     }
     return row;
   }
@@ -749,7 +1022,7 @@ export class Grid {
   }
 
   makeRow(values = {}, offset = 0) {
-    const row = Object.fromEntries(this.columns.map(column => [column.field, typeof column.defaultValue === 'function' ? column.defaultValue(this.model.rows.length + offset) : column.defaultValue ?? (['number', 'boolean'].includes(column.type) ? null : '')]));
+    const row = Object.fromEntries(this.model.columns.map(column => [column.field, typeof column.defaultValue === 'function' ? column.defaultValue(this.model.rows.length + offset) : column.defaultValue ?? (['number', 'boolean'].includes(column.type) ? null : '')]));
     Object.assign(row, values);
     if (this.tree && !row[this.tree.idField]) {
       let index = this.model.rows.length + offset + 1;
@@ -760,10 +1033,10 @@ export class Grid {
   }
 
   addRow(values = {}) {
-    if (!this.model.editable || this.editor && !this.finishEdit()) return false;
+    if (!this.editable || this.editor && !this.finishEdit()) return false;
     const row = this.makeRow(values);
     const index = this.model.rows.length; let changes;
-    try { changes = this.model.insertRows(index, [row]); }
+    try { changes = this.mutateModel('insertRows', index, [row]); }
     catch (error) { this.message(error.message, true); return false; }
     this.query = ''; this.search.value = ''; this.setFilters([]); this.changed(changes, 'insert');
     const visible = this.view.findIndex(item => item.index === index);
@@ -772,7 +1045,7 @@ export class Grid {
   }
 
   deleteSelectedRows() {
-    if (!this.model.editable || !this.view.length || this.editor && !this.finishEdit()) return false;
+    if (!this.editable || !this.view.length || this.editor && !this.finishEdit()) return false;
     const range = this.getSelection(), indices = new Set(this.view.slice(range.top, range.bottom + 1).map(item => item.index));
     if (this.tree) {
       const { byId, children } = treeIndex(this.model.rows, this.tree);
@@ -780,13 +1053,14 @@ export class Grid {
       while (pending.length) { const item = pending.pop(); indices.add(item.index); pending.push(...(children.get(item.id) || [])); }
     }
     let changes;
-    try { changes = this.model.removeRows([...indices]); }
+    try { changes = this.mutateModel('removeRows', [...indices]); }
     catch (error) { this.message(error.message, true); return false; }
     this.changed(changes, 'delete'); return true;
   }
 
   mergeSelection() {
     if (!this.view.length || this.editor && !this.finishEdit()) return false;
+    if (this.virtualActive) { this.message('가상 스크롤에서는 수동 병합을 지원하지 않습니다.', true); return false; }
     if (this.tree || this.groupBy.length) { this.message('셀 병합은 일반 그리드 모드에서 사용하세요.', true); return false; }
     const range = this.getSelection();
     if (range.top === range.bottom && range.left === range.right) { this.message('병합할 여러 셀을 선택하세요.', true); return false; }
@@ -802,7 +1076,7 @@ export class Grid {
   }
 
   async importXLSX(file, options = {}) {
-    if (!this.model.editable || this.editor && !this.finishEdit()) return false;
+    if (!this.editable || this.editor && !this.finishEdit()) return false;
     const revision = this.dataRevision, sequence = ++this.importSequence;
     let rows, changes;
     try {
@@ -811,17 +1085,18 @@ export class Grid {
       if (bytes.byteLength > 20 * 1024 * 1024) throw new Error('20MB 이하의 XLSX 파일을 선택하세요.');
       if (this.destroyed || sequence !== this.importSequence) return false;
       if (revision !== this.dataRevision) throw new Error('파일을 읽는 동안 데이터가 변경됐습니다. 다시 가져오세요.');
-      rows = readXLSX(bytes, this.xlsx, this.columns, options); changes = this.model.replaceRows(rows, 'import');
+      rows = readXLSX(bytes, this.xlsx, this.columns, { formulas: this.model.formulas, ...options }); changes = this.mutateModel('replaceRows', rows, 'import');
     } catch (error) { this.message(error.message, true); return false; }
     this.query = ''; this.search.value = ''; this.setFilters([]); this.changed(changes, 'import'); this.message(`${rows.length}행 XLSX 가져오기 완료 · Ctrl+Z로 원복`); return true;
   }
 
-  exportXLSX({ fileName = 'moa-grid.xlsx', scope = 'view', sheetName = '데이터' } = {}) {
+  exportXLSX({ fileName = 'moa-grid.xlsx', scope = 'view', sheetName = '데이터', formulas = false } = {}) {
     if (this.editor && !this.finishEdit()) return false;
     try {
       if (!['view', 'all'].includes(scope)) throw new Error('내보내기 scope는 view 또는 all이어야 합니다.');
-      const rows = scope === 'all' ? this.getData() : this.view.map(item => item.row);
-      const bytes = writeXLSX(rows, this.xlsx, this.columns, { sheetName, merges: scope === 'view' ? this.merges : [] });
+      if (formulas && (!this.model.formulas || scope !== 'all')) throw new Error('수식 보존은 formulas 모드에서 scope: all로 내보내세요.');
+      const rows = scope === 'all' ? this.getData({ raw: formulas }) : this.view.map(item => item.row);
+      const bytes = writeXLSX(rows, this.xlsx, this.columns, { sheetName, merges: scope === 'view' ? this.merges : [], formulas });
       this.downloadFile(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileName);
       this.message(`${rows.length}행 XLSX 내보내기 완료`); return true;
     } catch (error) { this.message(error.message, true); return false; }
@@ -832,7 +1107,8 @@ export class Grid {
   }
 
   onKey(event) {
-    if (this.editor || event.isComposing || event.keyCode === 229) return;
+    if (this.editor) return;
+    if (event.isComposing || event.keyCode === 229) { if (this.cellAt(event.target)) this.startEdit(this.current, ''); return; }
     if (event.target.closest('button,[role=separator]')) return;
     const modifier = event.ctrlKey || event.metaKey, key = event.key.toLowerCase();
     if (modifier && (key === 'z' || key === 'y')) {
@@ -842,7 +1118,7 @@ export class Grid {
       if (!this.view.length) return;
       event.preventDefault(); this.anchor = { row: 0, col: 0 }; this.select({ row: this.view.length - 1, col: this.columns.length - 1 }, true); return;
     }
-    if (!this.cellAt(event.target) || !this.view.length) return;
+    if ((!this.cellAt(event.target) && event.target !== this.table) || !this.view.length) return;
     if (modifier && event.key === 'Delete') { event.preventDefault(); this.deleteSelectedRows(); return; }
     if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); this.clearSelection(); return; }
     const destination = { ...this.current };
@@ -865,7 +1141,7 @@ export class Grid {
 
   startEdit(cell, initial) {
     cell = this.mergeOwners.get(`${cell.row}:${cell.col}`) || cell;
-    if (this.editor || !this.model.editable || this.columns[cell.col].editable === false || !this.view[cell.row]) return;
+    if (this.editor || !this.editable || this.columns[cell.col].editable === false || !this.view[cell.row]) return;
     this.select(cell);
     const column = this.columns[cell.col], dataRow = this.view[cell.row].index;
     const td = this.table.querySelector('td[tabindex="0"]'), input = node('input');
@@ -873,10 +1149,12 @@ export class Grid {
     input.setAttribute('aria-describedby', this.status.id);
     if (column.type === 'number') input.inputMode = 'decimal';
     input.value = initial ?? this.model.rows[dataRow][column.field] ?? '';
-    this.editor = { input, cell: { ...cell }, dataRow, column };
+    this.editor = { input, cell: { ...cell }, dataRow, column, revision: this.model.revision, composing: false };
+    input.addEventListener('compositionstart', () => { if (this.editor?.input === input) this.editor.composing = true; });
+    input.addEventListener('compositionend', () => { if (this.editor?.input === input) { this.editor.composing = false; this.editor.compositionEnded = performance.now(); } });
     td.replaceChildren(input); input.focus(); if (initial == null) input.select();
     input.addEventListener('keydown', event => {
-      event.stopPropagation(); if (event.isComposing || event.keyCode === 229) return;
+      event.stopPropagation(); if (event.isComposing || event.keyCode === 229 || this.editor?.composing || (event.key === 'Enter' && performance.now() - (this.editor?.compositionEnded ?? -Infinity) < 30)) return;
       if (event.key === 'Escape') { event.preventDefault(); this.cancelEdit(); }
       else if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault(); const location = { ...this.current };
@@ -897,9 +1175,11 @@ export class Grid {
   cancelEdit() { this.editor = null; this.render(); this.focusCell(); this.message('편집을 취소했습니다.'); }
   finishEdit() {
     if (!this.editor) return true;
+    if (this.editor.composing) return false;
+    if (this.editor.revision !== this.model.revision) { this.message('외부 데이터가 변경됐습니다. Esc로 취소하고 다시 입력하세요.', true); return false; }
     const { input, dataRow, column } = this.editor;
     let changes;
-    try { changes = this.model.apply([{ row: dataRow, field: column.field, value: input.value }], 'edit'); }
+    try { changes = this.mutateModel('apply', [{ row: dataRow, field: column.field, value: input.value }], 'edit'); }
     catch (error) { input.setAttribute('aria-invalid', 'true'); input.title = error.message; this.message(error.message, true); return false; }
     this.editor = null; this.changed(changes, 'edit'); return true;
   }
@@ -907,9 +1187,15 @@ export class Grid {
   selectedChanges(valueFactory) {
     const range = this.getSelection(), changes = [];
     for (let row = range.top; row <= range.bottom && row < this.view.length; row++) {
-      for (let col = range.left; col <= range.right; col++) changes.push({ row: this.view[row].index, field: this.columns[col].field, value: valueFactory(row, col) });
+      for (let col = range.left; col <= range.right; col++) if (this.columns[col].editable !== false) changes.push({ row: this.view[row].index, field: this.columns[col].field, value: valueFactory(row, col) });
     }
     return changes;
+  }
+
+  copyRawSelection() {
+    const range = this.getSelection(), cells = [];
+    for (let row = range.top; row <= range.bottom && row < this.view.length; row++) cells.push(this.columns.slice(range.left, range.right + 1).map((column, x) => ({ row: this.view[row].index, col: this.model.columns.findIndex(item => item.field === column.field), value: this.model.rows[this.view[row].index][column.field] })));
+    return { version: 1, cells };
   }
 
   copySelection() {
@@ -919,7 +1205,7 @@ export class Grid {
   }
 
   paste(text) {
-    if (this.editor || !this.model.editable) return false;
+    if (this.editor || !this.editable) return false;
     let applied, range, height, width;
     try {
       const matrix = Array.isArray(text) ? text : parseTSV(text), changes = [];
@@ -931,16 +1217,16 @@ export class Grid {
       if (extra && !this.columns.slice(range.left, range.left + width).some(column => column.editable !== false)) throw new Error('읽기 전용 셀에는 행을 추가해 붙여넣을 수 없습니다.');
       if (extra && (this.options.pasteAppend === false || this.query.trim() || this.filters.length || this.groupBy.length || this.tree)) throw new Error('행 범위를 넘었습니다. 일반 모드에서 검색·필터를 해제하거나 행을 추가하세요.');
       if (extra) {
-        const candidate = this.getData(), originalCount = candidate.length;
+        const candidate = this.model.getData(), originalCount = candidate.length;
         for (let index = 0; index < extra; index++) candidate.push(this.makeRow({}, index));
         matrix.forEach((row, y) => row.forEach((value, x) => {
           const column = this.columns[range.left + x], target = this.view[range.top + y]?.index ?? originalCount + range.top + y - this.view.length;
           if (column.editable !== false) candidate[target][column.field] = this.model.convert(column, value);
         }));
-        applied = this.model.replaceRows(candidate, 'paste', false);
+        applied = this.mutateModel('replaceRows', candidate, 'paste', false);
       } else {
-        matrix.forEach((row, y) => row.forEach((value, x) => changes.push({ row: this.view[range.top + y].index, field: this.columns[range.left + x].field, value })));
-        applied = this.model.apply(changes, 'paste');
+        matrix.forEach((row, y) => row.forEach((value, x) => { if (this.columns[range.left + x].editable !== false) changes.push({ row: this.view[range.top + y].index, field: this.columns[range.left + x].field, value }); }));
+        applied = this.mutateModel('apply', changes, 'paste');
       }
     } catch (error) { this.message(error.message, true); return false; }
     this.anchor = { row: range.top, col: range.left }; this.current = { row: range.top + height - 1, col: range.left + width - 1 };
@@ -950,13 +1236,13 @@ export class Grid {
   clearSelection() {
     if (this.editor) return;
     let changes;
-    try { changes = this.model.apply(this.selectedChanges(() => ''), 'clear'); }
+    try { changes = this.mutateModel('apply', this.selectedChanges(() => ''), 'clear'); }
     catch (error) { this.message(error.message, true); return; }
     this.changed(changes, 'clear');
   }
 
-  undo() { if (this.editor) this.cancelEdit(); else this.changed(this.model.undo(), 'undo'); }
-  redo() { if (!this.editor) this.changed(this.model.redo(), 'redo'); }
+  undo() { if (!this.editable) return; if (this.editor) this.cancelEdit(); else this.changed(this.mutateModel('undo'), 'undo'); }
+  redo() { if (this.editable && !this.editor) this.changed(this.mutateModel('redo'), 'redo'); }
   changed(changes, reason) {
     if (changes.length) this.dataRevision++;
     if (changes.length && (this.query.trim() || this.filters.length || this.sorts.length)) this.merges = [];
@@ -965,9 +1251,10 @@ export class Grid {
     this.message(changes.length ? `${changes.some(change => change.kind === 'rows') ? '행 데이터' : changes.length + '셀'} ${reason === 'undo' ? '되돌림' : reason === 'redo' ? '다시 적용' : '변경'} · ${this.model.canUndo ? 'Ctrl+Z로 되돌리기' : '되돌릴 작업 없음'}` : '변경된 셀이 없습니다.');
     if (changes.length) this.options.onChange?.({ reason, changes, data: this.getData() });
   }
-  getData() { return this.model.getData(); }
+  getData({ raw = false } = {}) { return raw ? this.model.getData() : this.model.getComputedData(); }
+  mutateModel(method, ...args) { this.localWrite = true; try { return this.model[method](...args); } finally { this.localWrite = false; } }
   setSearch(query) { if (this.editor) this.cancelEdit(); this.query = String(query); this.search.value = this.query; this.merges = []; this.resetSelection(); this.render(); }
-  setData(rows) { this.model.setData(rows); this.dataRevision++; this.editor = null; this.merges = []; this.resetSelection(); this.render(); }
+  setData(rows) { this.mutateModel('setData', rows); this.dataRevision++; this.editor = null; this.merges = []; this.resetSelection(); this.render(); }
   downloadCSV() {
     if (this.editor && !this.finishEdit()) return;
     const quote = value => {
@@ -979,7 +1266,7 @@ export class Grid {
     const blob = new Blob(['\uFEFF' + rows.map(row => row.map(quote).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
     this.downloadFile(blob, 'moa-grid.csv'); this.message('검색·정렬된 데이터를 CSV로 내보냈습니다.');
   }
-  destroy() { this.destroyed = true; this.editor = null; this.resizeObserver.disconnect(); this.events.abort(); this.root.remove(); }
+  destroy() { this.destroyed = true; this.editor = null; this.resizeObserver.disconnect(); this.unsubscribe?.(); cancelAnimationFrame(this.scrollFrame); this.events.abort(); this.root.remove(); }
 }
 
 export default Grid;

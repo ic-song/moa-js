@@ -4,9 +4,17 @@
 
 코어는 외부 런타임 의존성·CDN·웹폰트·온라인 인증·텔레메트리 없이 실행합니다. XLSX 파일 기능에는 로컬 동봉한 SheetJS Community Edition을 선택적으로 사용합니다. 프레임워크와 분리된 JS·CSS 파일을 제공하며 Moa 자체 코드는 상업적 사용과 수정·재배포가 가능한 MIT 라이선스입니다. 동봉 라이브러리는 [별도 Apache-2.0 라이선스](packages/grid/THIRD_PARTY_NOTICES.md)를 유지합니다.
 
-현재 **0.2.0**으로 Excel 클립보드, XLSX 입출력과 업무용 고급 기능의 기본 구현을 제공합니다. RealGrid 공식 기능을 참고해 자체 구현하며 원본 코드·리소스를 포함하지 않습니다. RealGrid 전체 기능·API와의 호환성을 보장하지 않습니다. npm에는 아직 등록하지 않았습니다.
+현재 **0.3.0**으로 Excel 조작·XLSX·그룹/트리에 행·열 가상 스크롤, A1 수식과 공개 API 일부 이행 계층을 추가했습니다. RealGrid 공식 기능을 참고해 자체 구현하며 원본 코드·리소스를 포함하지 않습니다. RealGrid 전체 기능·API와의 호환성을 보장하지 않습니다. npm에는 아직 등록하지 않았습니다.
 
-## 0.2.0에 추가한 기능
+## 0.3.0에 추가한 기능
+
+- 행·열 가상 스크롤: 10만 행·200열 시나리오와 화면 밖 범위 조작 검증
+- opt-in A1 수식: 참조·범위·13개 함수·계산 오류·Undo/Redo·XLSX 원문 보존
+- `MoaRealGrid.LocalDataProvider`·`GridView` 공개 API 일부 이행과 공유 데이터/이력
+- IME 조합 중 입력 DOM 유지·Enter/Tab 처리, 외부 데이터 변경 시 오래된 편집 방지
+- [확장 예제](examples/advanced/index.html), [확장 API](docs/grid-advanced.md), [이행 지원표](docs/realgrid-api-subset.md)
+
+## 앞서 추가한 Excel·고급 기능
 
 - Excel 셀의 HTML+TSV 복사·붙여넣기: 쉼표 숫자·소수·한글·셀 내부 탭·줄바꿈
 - 일반 모드에서 빈 표·마지막 행 이후 붙여넣기의 자동 행 확장과 한 번의 Undo/Redo
@@ -61,7 +69,7 @@
 
 macOS는 Ctrl 대신 ⌘를 사용합니다. 셀 안에서 텍스트를 편집 중이면 복사·붙여넣기·실행 취소는 기본 입력창 동작을 유지합니다. 읽기 전용 컬럼은 보호하며, 잘못된 값·범위 초과가 있으면 붙여넣기 전체를 적용하지 않습니다. 자세한 정책은 [셀 조작 계약](docs/grid-interaction-contract.md)에 있습니다.
 
-일반 모드에서는 행만 부족한 경우 자동으로 추가합니다. 그룹·트리·검색·조건 필터 상태의 행 범위 초과는 거부합니다. XLSX 가져오기는 헤더로 매핑한 데이터 전체 교체이며 Ctrl+Z/Y로 복원할 수 있습니다. 한글 IME·스크린리더·다른 브라우저 엔진은 추가 수용시험이 필요합니다.
+일반 모드에서는 행만 부족한 경우 자동으로 추가합니다. 그룹·트리·검색·조건 필터 상태의 행 범위 초과는 거부합니다. XLSX 가져오기는 헤더로 매핑한 데이터 전체 교체이며 Ctrl+Z/Y로 복원할 수 있습니다. 한글 composition 파이프라인은 검사했으며, 네이티브 IME·스크린리더·다른 브라우저 엔진은 추가 수용시험이 필요합니다.
 
 ## 구현 대상과 개발 순서
 
@@ -82,10 +90,10 @@ npm run catalog -- --check
 
 `npm run build`는 소스에서 브라우저 JS·ESM·CommonJS·CSS를 생성합니다. `npm run catalog`는 JSON 원본에서 기능 문서를 갱신합니다. 배포물은 저장소에 포함하므로 사용자가 빌드할 필요는 없습니다.
 
-브라우저 개발 검증 도구는 런타임과 별개입니다. Playwright와 Chromium을 준비한 개발 환경에서 `node scripts/serve.mjs`를 실행하고 다른 터미널에서 `node scripts/browser-check.mjs`, `node scripts/browser-advanced-check.mjs`를 실행합니다. 폐쇄망에서는 이미 준비된 개발 도구를 반입하거나 배포 파일만 사용하세요. 실제 Excel 생성 파일·복사 데이터와 내보낸 파일 검증 방법은 [검증 기록](docs/verification.md)에 있습니다.
+브라우저 개발 검증 도구는 런타임과 별개입니다. Playwright와 Chromium을 준비한 개발 환경에서 `node scripts/serve.mjs`를 실행하고 다른 터미널에서 `node scripts/browser-check.mjs`, `node scripts/browser-advanced-check.mjs`, `node scripts/browser-followup-check.mjs`를 실행합니다. 폐쇄망에서는 이미 준비된 개발 도구를 반입하거나 배포 파일만 사용하세요. 실제 Excel 생성 파일·복사 데이터와 내보낸 파일 검증 방법은 [검증 기록](docs/verification.md)에 있습니다.
 
 ## 현재 한계
 
-변경은 메모리에 유지되며 서버·파일에 자동 저장하지 않습니다. 가상 스크롤·페이징·행 변경 상태·자동 같은 값 병합·피벗·수식 엔진은 후속 구현 대상입니다. 그룹과 트리는 별도 모드이며 수동 병합은 일반 모드에서 사용합니다. 대용량 처리 성능과 전체 브라우저·한글 IME·스크린리더 호환성은 아직 인증하지 않았습니다.
+변경은 메모리에 유지되며 서버·파일에 자동 저장하지 않습니다. 페이징·행 변경 상태·자동 같은 값 병합·피벗·전체 Excel 수식은 후속 구현 대상입니다. 그룹과 트리는 별도 모드이며 수동 병합은 가상 스크롤이 꺼진 일반 모드에서 사용합니다. 대용량 처리 성능과 전체 브라우저·한글 IME·스크린리더 호환성은 아직 인증하지 않았습니다.
 
 RealGrid는 기능 참고 대상의 제품명이며 이 프로젝트는 해당 제품과 제휴하지 않습니다. [MIT License](LICENSE)는 이 저장소의 자체 작성물에 적용됩니다.

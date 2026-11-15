@@ -77,6 +77,15 @@
 .moa-grid__tree-indent { max-width: 50%; }
 .moa-grid__tree-toggle, .moa-grid__tree-leaf { width: 30px; min-height: 30px; margin-right: var(--moa-space); }
 .moa-grid__tree-toggle { border: 1px solid var(--moa-line); background: var(--moa-surface); border-radius: 4px; }
+.moa-grid--virtual table { min-width: 0; }
+.moa-grid--virtual thead th { height: 56px; max-height: 56px; white-space: nowrap; overflow: hidden; }
+.moa-grid--virtual tbody tr:not(.moa-grid__spacer) { height: 48px; }
+.moa-grid--virtual tbody tr:not(.moa-grid__spacer) > * { height: 48px; max-height: 48px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.moa-grid--virtual .moa-grid__group button { height: 46px; min-height: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.moa-grid--virtual tbody tr > th:first-child { padding-inline: 4px; font-size: 12px; }
+.moa-grid .moa-grid__gap { padding: 0; border: 0; pointer-events: none; }
+.moa-grid .moa-grid__spacer > td { padding: 0; border: 0; line-height: 0; pointer-events: none; }
+.moa-grid td.is-formula-error { color: var(--moa-danger); }
 @media (max-width: 640px) {
   .moa-grid { --moa-control: 44px; }
   .moa-grid__search { width: 100%; }

@@ -1650,12 +1650,12 @@
       "category": "EXPORT",
       "name": "수식 내보내기",
       "phase": "M3",
-      "status": "planned",
+      "status": "partial",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/excels/excel-formula"
       ],
-      "acceptance": "xlsx 수식 작성과 화면 계산 필드 구분"
+      "acceptance": "opt-in A1 수식·계산 캐시 XLSX 출력, 헤더 참조 변환·동일 컬럼 순서 가져오기; 전체 Excel 문법·스타일 미지원"
     },
     {
       "id": "STYLE-001",
@@ -1794,12 +1794,12 @@
       "category": "STYLE",
       "name": "대량 데이터 성능",
       "phase": "M2",
-      "status": "planned",
+      "status": "partial",
       "evidence": "body-reviewed",
       "sources": [
         "https://docs.realgrid.com/guides/performance/large-data-load-test"
       ],
-      "acceptance": "테스트 환경·행×열·시간·메모리 공개; 무제한 성능 주장 없음"
+      "acceptance": "10만 행×12열 및 1천 행×200열 Chromium 실측·가상 DOM 수 검사; 전체 메모리·다른 엔진·서버 공급 후속"
     },
     {
       "id": "STYLE-013",
@@ -1830,12 +1830,14 @@
       "category": "STYLE",
       "name": "RealGrid API 이행 어댑터",
       "phase": "M3",
-      "status": "planned",
-      "evidence": "index-listed",
+      "status": "partial",
+      "evidence": "body-reviewed",
       "sources": [
-        "https://docs.realgrid.com/refs/Class/GridBase"
+        "https://docs.realgrid.com/refs/Class/GridBase",
+        "https://docs.realgrid.com/refs/Class/LocalDataProvider",
+        "https://docs.realgrid.com/refs/Class/DataProviderBase"
       ],
-      "acceptance": "사용 API 목록별 호환 테스트; 미지원은 명시적 오류"
+      "acceptance": "공개 API 일부 이행 계층·지원 인수 문서·공유 provider 회귀 검사; 전체 RealGrid 대조 시험·API 호환 아님"
     },
     {
       "id": "EXT-001",
@@ -1892,10 +1894,10 @@
       "category": "EXT",
       "name": "가상 스크롤",
       "phase": "M2",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "proposal",
       "sources": [],
-      "acceptance": "보이는 행·열 중심 렌더링; 선택과 클립보드는 전체 모델 기준"
+      "acceptance": "200행/30열 초과 시 행·열 가상 렌더링, 고정 열·키보드·화면 밖 범위 조작; 고정 48px·수동 병합 제외"
     },
     {
       "id": "EXT-007",
@@ -1912,10 +1914,10 @@
       "category": "EXT",
       "name": "엑셀식 수식 엔진",
       "phase": "M3",
-      "status": "planned",
+      "status": "partial",
       "evidence": "proposal",
       "sources": [],
-      "acceptance": "별도 선택 모듈로 참조·의존·순환 계산 지원; 현재 그리드 범위 밖"
+      "acceptance": "opt-in A1/$ 참조·범위·산술·비교·13개 함수·오류·Undo/Redo·XLSX; 주소 구조 자동 재작성·전체 Excel 문법 제외"
     },
     {
       "id": "EXT-009",
@@ -1945,7 +1947,7 @@
       "status": "partial",
       "evidence": "proposal",
       "sources": [],
-      "acceptance": "모델·Chromium·실제 Excel 생성 파일과 복사 데이터 검증; 다른 엔진·IME·스크린리더는 후속"
+      "acceptance": "단위·Chromium·실제 Excel·10만 행/200열·API 일부 이행·composition 파이프라인 검사; 네이티브 IME·다른 엔진·스크린리더 후속"
     },
     {
       "id": "EXT-012",

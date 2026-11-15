@@ -112,3 +112,14 @@ test('XLSX errors and uncached formulas cannot silently become numeric values or
     assert.throws(() => readXLSX(XLSX.write(book, { type: 'array', bookType: 'xlsx' }), XLSX, columns), /오류 셀|계산 결과/);
   }
 });
+
+test('opt-in XLSX formulas preserve raw A1 addresses, absolute references, cached values and blank rows', () => {
+  const fields = [{ field: 'a', type: 'number' }, { field: 'b', type: 'number' }];
+  const source = [{ a: 2, b: '=$A$1*3' }, { a: null, b: null }, { a: 4, b: '=SUM(A1:A3)' }];
+  const bytes = writeXLSX(source, XLSX, fields, { formulas: true });
+  const sheet = XLSX.read(bytes, { type: 'array' }).Sheets['데이터'];
+  assert.equal(sheet.B2.f, '$A$2*3'); assert.equal(sheet.B2.v, 6); assert.equal(sheet.B4.f, 'SUM(A2:A4)'); assert.equal(sheet.B4.v, 6);
+  assert.deepEqual(readXLSX(bytes, XLSX, fields, { formulas: true }), source.map(row => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, value ?? '']))));
+  assert.throws(() => writeXLSX([{ a: '=A1', b: 1 }], XLSX, fields, { formulas: true }), /CYCLE/);
+  assert.throws(() => readXLSX(bytes, XLSX, [...fields].reverse(), { formulas: true }), /컬럼 순서/);
+});

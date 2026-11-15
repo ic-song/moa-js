@@ -1,12 +1,29 @@
 {
   "name": "@moa-js/grid",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Dependency-free editable data grid with range selection and transactional clipboard operations.",
   "license": "MIT",
   "main": "dist/moa-grid.cjs",
   "module": "dist/moa-grid.mjs",
   "browser": "dist/moa-grid.js",
-  "exports": { ".": { "import": "./dist/moa-grid.mjs", "require": "./dist/moa-grid.cjs" }, "./style.css": "./dist/moa-grid.css" },
-  "files": ["dist", "vendor", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "SHA256SUMS.txt"]
+  "exports": {
+    ".": {
+      "import": "./dist/moa-grid.mjs",
+      "require": "./dist/moa-grid.cjs"
+    },
+    "./style.css": "./dist/moa-grid.css",
+    "./realgrid-compat": {
+      "import": "./dist/moa-realgrid.mjs",
+      "require": "./dist/moa-realgrid.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "vendor",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "SHA256SUMS.txt"
+  ]
 }
