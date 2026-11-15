@@ -4,7 +4,17 @@
 
 코어는 외부 런타임 의존성·CDN·웹폰트·온라인 인증·텔레메트리 없이 실행합니다. XLSX 파일 기능에는 로컬 동봉한 SheetJS Community Edition을 선택적으로 사용합니다. 프레임워크와 분리된 JS·CSS 파일을 제공하며 Moa 자체 코드는 상업적 사용과 수정·재배포가 가능한 MIT 라이선스입니다. 동봉 라이브러리는 [별도 Apache-2.0 라이선스](packages/grid/THIRD_PARTY_NOTICES.md)를 유지합니다.
 
-현재 **0.5.0**으로 로컬/서버 페이징·무한 스크롤과 Excel 범위 다운로드를 제공합니다. A1 수식·그룹/트리·공개 API 일부 이행 계층도 포함합니다. RealGrid 공식 기능을 참고해 자체 구현하며 원본 코드·리소스를 포함하지 않습니다. RealGrid 전체 기능·API와의 호환성을 보장하지 않습니다. npm에는 아직 등록하지 않았습니다.
+현재 **0.6.0**으로 로컬/서버 페이징·무한 스크롤, 서버 편집·추가·삭제·저장과 Excel 범위 다운로드를 제공합니다. A1 수식·그룹/트리·공개 API 일부 이행 계층도 포함합니다. RealGrid 공식 기능을 참고해 자체 구현하며 원본 코드·리소스를 포함하지 않습니다. RealGrid 전체 기능·API와의 호환성을 보장하지 않습니다. npm에는 아직 등록하지 않았습니다.
+
+## 0.6.0에 추가한 기능
+
+- `dataSource.save` 연결 시 서버 셀 편집·Excel 붙여넣기·행 추가/삭제와 저장 전 Ctrl+Z/Y
+- 추가·수정·삭제 묶음 저장, 변경 취소, 미저장 변경의 페이지/검색 이동 보호
+- 서버 행 버전 충돌 검사, 요청 ID로 중복 저장 방지, 응답 단절 후 같은 요청으로 결과 재확인
+- 재시작 후에도 행·저장 결과를 유지하는 [HTTP 편집 예제](examples/server-edit/index.html)
+- [저장 계약과 연결 방법](docs/server-editing.md), 3개 브라우저 엔진의 실제 HTTP CRUD·오류 복구 검증
+
+`node scripts/serve.mjs` 실행 후 `http://127.0.0.1:4173/examples/server-edit/index.html`에서 사용합니다. 예제는 로컬 JSON 파일에 저장하며, 실제 서비스의 인증·권한·DB 트랜잭션은 호스트 서버에 연결합니다.
 
 ## 0.5.0에 추가한 기능
 
@@ -14,7 +24,7 @@
 - 실행 가능한 [HTTP 예제](examples/server/index.html)와 [서버 API 계약](docs/server-data.md)
 - Chromium·Firefox·WebKit 서버 시나리오·자동 WCAG 검사, Firefox 한글 편집 Enter 처리 보완
 
-서버 예제는 저장소에서 `node scripts/serve.mjs`를 실행한 뒤 `http://127.0.0.1:4173/examples/server/index.html`에서 사용합니다. 예시 데이터의 실제 HTTP 통신이며 운영 DB 연결은 아닙니다. 서버 데이터는 조회 전용이고 변경 저장 API는 별도입니다.
+서버 조회 예제는 저장소에서 `node scripts/serve.mjs`를 실행한 뒤 `http://127.0.0.1:4173/examples/server/index.html`에서 사용합니다. 이 예제는 조회 전용이며, 0.6.0의 별도 서버 편집 예제에서 변경 저장을 제공합니다. 운영 DB 연결은 아닙니다.
 
 ## 0.4.0에 추가한 기능
 

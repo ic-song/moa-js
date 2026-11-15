@@ -130,4 +130,8 @@ XLSX 기본 내보내기는 현재 표시 행만 포함합니다. 접힌 그룹�
 
 ## 0.5 서버 데이터
 
-`dataSource: {load,rowKey,timeoutMs,exportRows}`로 서버 pagination/infinite를 연결합니다. `await grid.ready`, `reload()`, `retryLoad()`를 제공하고 페이지/추가 요청은 Promise<boolean>을 반환합니다. 서버 검색·정렬·필터와 실패/취소/재시도를 지원하며 서버 데이터는 조회 전용입니다. [실행 예제·요청/응답·전체 Excel·제약](../../docs/server-data.md)을 확인하세요.
+`dataSource: {load,rowKey,timeoutMs,exportRows}`로 서버 pagination/infinite를 연결합니다. `await grid.ready`, `reload()`, `retryLoad()`를 제공하고 페이지/추가 요청은 Promise<boolean>을 반환합니다. 서버 검색·정렬·필터와 실패/취소/재시도를 지원하며 save가 없는 서버 데이터는 조회 전용입니다. [실행 예제·요청/응답·전체 Excel·제약](../../docs/server-data.md)을 확인하세요.
+
+## 0.6 서버 편집·저장
+
+`dataSource.save`와 양의 정수 행 버전(`versionField`, 기본 `_version`)을 연결하면 서버 셀 편집·붙여넣기·행 추가/삭제와 Ctrl+Z/Y를 사용할 수 있습니다. `getChanges()`는 추가/수정/삭제 묶음, `getSaveState()`는 저장 상태를 반환합니다. `await saveChanges()`는 저장 확인, `await discardChanges()`는 초안 취소 후 재조회입니다. 미저장 변경의 조회 이동을 차단하고, 응답 불명 시 같은 요청 ID로 재확인합니다. 서버는 원자적 트랜잭션·버전 충돌 검사·영속적 요청 ID 중복 방지를 보장해야 합니다. [전체 계약·실행 예제](../../docs/server-editing.md)를 확인하세요.

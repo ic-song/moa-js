@@ -1,4 +1,4 @@
-/*! Moa JS Grid v0.5.0 | MIT License | See LICENSE */
+/*! Moa JS Grid v0.6.0 | MIT License | See LICENSE */
 // A bounded expression parser. No JavaScript evaluation or property access.
 class FormulaFault extends Error { constructor(code) { super(code); this.code = code; } }
 const fault = code => { throw new FormulaFault(code); };
@@ -673,6 +673,97 @@ export class RemoteData {
 }
 
 
+const draftField = '__moaClientId';
+const copy = value => JSON.parse(JSON.stringify(value));
+export function requestToken() {
+  return Array.from(globalThis.crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, '0')).join('');
+}
+
+// Compare against the loaded server window so undo/redo also changes the pending batch.
+export class RemoteChanges {
+  constructor(remote, model) {
+    this.remote = remote; this.model = model; this.versionField = remote.source.versionField ?? '_version';
+    if (remote.rowKey === draftField) throw Error(`${draftField}는 내부 예약 필드입니다.`);
+    if (typeof this.versionField !== 'string' || !this.versionField || [remote.rowKey, draftField, '__proto__', 'constructor', 'prototype'].includes(this.versionField)) throw Error('안전한 versionField가 필요합니다.');
+    if (model.columns.some(column => column.field === draftField)) throw Error(`${draftField}는 내부 예약 필드입니다.`);
+    for (const column of model.columns) if ([remote.rowKey, this.versionField].includes(column.field)) column.editable = false;
+    this.fields = model.columns.filter(column => column.editable !== false).map(column => column.field);
+    this.baseline = []; this.status = 'idle'; this.error = null;
+  }
+  validateVersions(rows) {
+    for (const row of rows) if (Object.hasOwn(row, draftField) || !Number.isSafeInteger(row[this.versionField]) || row[this.versionField] < 1) throw Error(`서버 저장 행에 양의 정수 ${this.versionField}가 필요합니다.`);
+    return rows;
+  }
+  reset(rows) { this.baseline = copy(rows); this.status = 'idle'; this.error = null; this.pending = null; }
+  newRow(row) { return { ...row, [this.remote.rowKey]: '', [this.versionField]: 0, [draftField]: requestToken() }; }
+  getChanges() {
+    const keyField = this.remote.rowKey, baseline = new Map(this.baseline.map(row => [String(row[keyField]), row])), seen = new Set(), clients = new Set();
+    const created = [], updated = [];
+    for (const row of this.model.rows) {
+      const values = Object.fromEntries(this.fields.map(field => [field, row[field] ?? null]));
+      if (row[draftField]) {
+        if (row[keyField] !== '' || row[this.versionField] !== 0 || clients.has(row[draftField])) throw Error('신규 행 식별자가 변경되거나 중복됐습니다.');
+        clients.add(row[draftField]); created.push({ clientId: row[draftField], values }); continue;
+      }
+      const key = String(row[keyField]), before = baseline.get(key);
+      if (!before || seen.has(key) || row[this.versionField] !== before[this.versionField]) throw Error('서버 행 키/버전은 직접 변경할 수 없습니다.');
+      seen.add(key);
+      const changes = Object.fromEntries(this.fields.filter(field => !Object.is(row[field], before[field])).map(field => [field, row[field] ?? null]));
+      if (Object.keys(changes).length) updated.push({ key: before[keyField], version: before[this.versionField], values: changes });
+    }
+    const deleted = this.baseline.filter(row => !seen.has(String(row[keyField]))).map(row => ({ key: row[keyField], version: row[this.versionField] }));
+    return copy({ created, updated, deleted });
+  }
+  get dirty() { const changes = this.getChanges(); return Object.values(changes).some(items => items.length); }
+  get locked() { return ['saving', 'uncertain', 'refresh'].includes(this.status); }
+  getState() { return { status: this.status, error: this.error, dirty: this.dirty, requestId: this.pending?.requestId ?? null }; }
+  prepare() {
+    if (this.status === 'uncertain') return this.pending;
+    for (const row of this.model.rows) for (const column of this.model.columns) {
+      if (row[draftField] && [this.remote.rowKey, this.versionField].includes(column.field)) continue;
+      this.model.convert(column, row[column.field]);
+    }
+    const changes = this.getChanges(), fingerprint = JSON.stringify(changes);
+    if (this.pending && fingerprint === this.fingerprint) return this.pending;
+    this.fingerprint = fingerprint; return this.pending = { requestId: requestToken(), ...changes };
+  }
+  receipt(result, batch) {
+    const fail = () => { throw Error('저장 응답이 변경 묶음과 일치하지 않습니다. 같은 요청으로 결과를 다시 확인하세요.'); };
+    if (!result || result.requestId !== batch.requestId || !Array.isArray(result.created) || !Array.isArray(result.updated) || !Array.isArray(result.deleted) || result.created.length !== batch.created.length || result.updated.length !== batch.updated.length || result.deleted.length !== batch.deleted.length) fail();
+    const keyField = this.remote.rowKey, versions = new Map(batch.updated.map(item => [String(item.key), item.version]));
+    const clients = new Set(batch.created.map(item => item.clientId)), created = new Map(), updated = new Map();
+    const received = [...result.created.map(item => item?.row), ...result.updated];
+    if (received.some(row => !row || this.model.columns.some(column => !Object.hasOwn(row, column.field)))) fail();
+    const canonical = this.validateVersions(this.remote.validateRows(received));
+    for (let i = 0; i < result.created.length; i++) {
+      const item = result.created[i]; if (!clients.delete(item.clientId)) fail(); created.set(item.clientId, canonical[i]);
+    }
+    for (const row of canonical.slice(result.created.length)) {
+      const key = String(row[keyField]), version = versions.get(key);
+      if (version == null || row[this.versionField] <= version) fail(); versions.delete(key); updated.set(key, row);
+    }
+    const deleted = new Set(batch.deleted.map(item => String(item.key)));
+    for (const key of result.deleted) if (!deleted.delete(String(key))) fail();
+    if (deleted.size || versions.size || clients.size) fail();
+    const rows = this.model.rows.map(row => created.get(row[draftField]) || updated.get(String(row[keyField])) || row);
+    this.validateVersions(this.remote.validateRows(rows)); return rows;
+  }
+  save(onChange) {
+    if (this.status === 'saving') return this.promise;
+    if (!this.dirty || this.status === 'refresh') return Promise.resolve(null);
+    let batch;
+    try { batch = this.prepare(); } catch (error) { this.status = 'error'; this.error = error.message; onChange(); return Promise.resolve(null); }
+    this.controller = new AbortController(); this.status = 'saving'; this.error = null;
+    this.promise = withRequestTimeout(() => this.remote.source.save({ ...copy(batch), signal: this.controller.signal }), this.controller, this.remote.timeoutMs)
+      .then(result => { const rows = this.receipt(result, batch); this.status = 'refresh'; return rows; })
+      .catch(error => { this.status = error?.committed === false ? 'error' : 'uncertain'; this.error = error?.message || String(error); return null; })
+      .finally(onChange);
+    onChange(); return this.promise;
+  }
+  dispose() { this.controller?.abort(); }
+}
+
+
 let gridSequence = 0;
 
 function node(tag, text, className) {
@@ -689,8 +780,10 @@ export class Grid {
     this.options = options;
     if (options.dataSource && (options.model || options.data?.length || options.formulas || options.tree || options.groupBy?.length)) throw new Error('서버 데이터는 공유 모델·초기 데이터·A1 수식·그룹·트리와 함께 사용하지 않습니다.');
     this.model = options.model || new GridModel(options.columns, options.data || [], { ...options, editable: options.dataSource ? false : options.editable });
-    if (options.dataSource) this.remote = new RemoteData(options.dataSource, { onChange: () => this.renderRemote(), convertRow: row => { const item = { ...row }; for (const column of this.columns) item[column.field] = this.model.convert(column, row[column.field]); return item; } });
+    if (options.dataSource) this.remote = new RemoteData(options.dataSource, { onChange: () => this.renderRemote(), convertRow: row => { const item = { ...row }; for (const column of this.columns) item[column.field] = this.model.convert(column, row[column.field]); this.remoteChanges?.validateVersions([item]); return item; } });
     this.columns = options.model ? options.columns.map(column => ({ ...column })) : this.model.columns;
+    if (options.dataSource?.save != null && typeof options.dataSource.save !== 'function') throw Error('dataSource.save는 함수여야 합니다.');
+    if (options.dataSource?.save && options.editable !== false) this.remoteChanges = new RemoteChanges(this.remote, this.model);
     this.virtual = options.virtual !== false; this.rowHeight = 48;
     this.dataMode = options.dataMode || (this.remote ? 'pagination' : 'virtual');
     if (this.remote && this.dataMode === 'virtual') throw new Error('서버 데이터는 pagination 또는 infinite 모드로 사용하세요.');
@@ -720,6 +813,9 @@ export class Grid {
     this.clearButton = button('선택 지우기', () => this.clearSelection());
     this.addButton = button('행 추가', () => this.addRow());
     this.removeButton = button('선택 행 삭제', () => this.deleteSelectedRows());
+    this.saveButton = button('변경 저장', () => this.saveChanges()); this.saveButton.hidden = !this.remoteChanges;
+    this.discardButton = button('변경 취소', () => this.discardChanges()); this.discardButton.hidden = !this.remoteChanges;
+    window.addEventListener('beforeunload', event => { if (this.remoteChanges?.dirty || this.remoteChanges?.locked) { event.preventDefault(); event.returnValue = ''; } }, { signal });
     this.filterButton = button('필터', () => { this.filterPanel.hidden = !this.filterPanel.hidden; this.filterButton.setAttribute('aria-expanded', String(!this.filterPanel.hidden)); });
     this.filterButton.setAttribute('aria-expanded', 'false');
     this.mergeButton = button('셀 병합', () => this.mergeSelection()); this.unmergeButton = button('병합 해제', () => this.unmergeSelection());
@@ -838,32 +934,80 @@ export class Grid {
 
   get editable() { return this.model.editable && this.options.editable !== false; }
 
+  getChanges() { return this.remoteChanges?.getChanges() ?? { created: [], updated: [], deleted: [] }; }
+  getSaveState() { return this.remoteChanges?.getState() ?? { status: 'readonly', dirty: false, error: null, requestId: null }; }
+  canLeaveRemote(quiet = false) {
+    if (!this.remoteChanges) return true;
+    if (this.editor && !this.finishEdit()) return false;
+    if (!this.remoteChanges.dirty && !this.remoteChanges.locked) return true;
+    if (!quiet) this.message('변경 내용을 저장하거나 취소한 뒤 조회 조건을 바꾸세요. 저장 결과가 불명확하면 먼저 결과를 다시 확인하세요.', true);
+    this.search.value = this.query; this.modeSelect.value = this.dataMode; this.sizeSelect.value = this.pageSize; this.pageInput.value = this.pageIndex + 1; this.logicSelect.value = this.filterLogic;
+    return false;
+  }
+  saveChanges() {
+    if (!this.remoteChanges || this.destroyed) return Promise.resolve(false);
+    if (this.savePromise) return this.savePromise;
+    if (this.remote.loading || this.editor && !this.finishEdit()) return Promise.resolve(false);
+    this.exportRequest?.abort();
+    const pending = this.remoteChanges.save(() => { if (!this.destroyed) this.renderRemote(); });
+    this.savePromise = pending.then(async rows => {
+      if (!rows || this.destroyed) return false;
+      this.mutateModel('setData', rows); this.remoteChanges.reset(rows); this.remoteChanges.status = 'refresh'; this.dataRevision++; this.renderRemote();
+      const refreshed = await this.remote.reload();
+      if (!this.destroyed) this.message(refreshed ? '서버에 변경 내용을 저장했습니다.' : '저장은 완료됐지만 목록 갱신에 실패했습니다. 다시 불러오세요.', !refreshed);
+      return true;
+    }).finally(() => { this.savePromise = null; });
+    return this.savePromise;
+  }
+  discardChanges() {
+    if (!this.remoteChanges || this.destroyed || this.remoteChanges.locked || this.remote.loading) return Promise.resolve(false);
+    this.cancelEdit(); this.mutateModel('setData', this.remoteChanges.baseline); this.dataRevision++;
+    this.remoteChanges.reset(this.model.rows); this.remoteChanges.status = 'refresh'; this.renderRemote();
+    return this.ready = this.remote.reload();
+  }
+
   renderRemote() {
     if (this.destroyed) return;
     if (this.remoteRows !== this.remote.rows) {
       const append = this.remote.lastRequest?.append && this.remote.rows.length >= this.model.rows.length;
       this.remoteRows = this.remote.rows; this.mutateModel('setData', this.remote.rows); this.dataRevision++;
+      const refreshing = this.remoteChanges?.status === 'refresh';
+      this.remoteChanges?.reset(this.remote.rows);
+      if (refreshing && this.remote.loading) this.remoteChanges.status = 'refresh';
       this.merges = []; if (!append) this.resetSelection();
     }
+    this.model.editable = !!this.remoteChanges && !this.remote.loading && !this.remote.error && !this.remoteChanges.locked;
     // Ordering and filtering were already applied to the complete dataset by the server.
     this.fullResult = buildDisplay(this.model.rows, { columns: this.columns }); this.applyRowWindow();
   }
   updateRemoteControls() {
     const { loading, error, total, lastRequest } = this.remote;
-    this.loadState.hidden = false; this.loadState.classList.toggle('is-error', !!error);
-    this.table.setAttribute('aria-busy', String(loading));
+    this.loadState.hidden = false;
+    const save = this.remoteChanges, changes = save?.getChanges(), dirty = save?.dirty, locked = save?.locked;
+    this.loadState.classList.toggle('is-error', !!error || ['error', 'uncertain'].includes(save?.status));
+    this.table.setAttribute('aria-busy', String(loading || save?.status === 'saving'));
     this.loadText.textContent = loading ? `${this.dataMode === 'pagination' ? (Math.floor(lastRequest.offset / this.pageSize) + 1) + '페이지 ' : ''}서버 데이터를 불러오는 중…` : error ? `불러오기 실패: ${error}` : this.exportRequest ? '서버 Excel 데이터를 준비하는 중…' : `서버 연결 · ${total ?? 0}행 · 읽기 전용`;
     this.retryButton.hidden = !error; this.retryButton.disabled = loading; this.reloadButton.disabled = loading;
-    for (const scope of ['filtered', 'all']) this.exportScope.querySelector(`[value=${scope}]`).disabled = !this.remote.source.exportRows;
+    if (save) {
+      const counts = `추가 ${changes.created.length} · 수정 ${changes.updated.length} · 삭제 ${changes.deleted.length}`;
+      if (!loading && !error) this.loadText.textContent = save.status === 'saving' ? '서버에 변경 내용을 저장하는 중…' : save.status === 'uncertain' ? `저장 결과 확인 필요: ${save.error}` : save.status === 'refresh' ? '목록을 다시 불러온 뒤 편집하세요.' : save.error ? `저장 실패: ${save.error} · ${counts}` : `서버 연결 · ${total ?? 0}행 · ${dirty ? counts : '저장할 변경 없음'}`;
+      this.saveButton.textContent = save.status === 'uncertain' ? '저장 결과 다시 확인' : '변경 저장';
+      this.saveButton.disabled = loading || save.status === 'saving' || save.status === 'refresh' || !dirty;
+      this.discardButton.disabled = loading || locked || !dirty;
+      this.reloadButton.disabled = loading || dirty || locked && save.status !== 'refresh';
+    }
+    for (const scope of ['filtered', 'all']) this.exportScope.querySelector(`[value=${scope}]`).disabled = !this.remote.source.exportRows || dirty || locked;
     if (this.exportScope.selectedOptions[0]?.disabled) this.exportScope.value = 'view';
-    this.exportButton.disabled = !this.xlsx || loading || !!this.exportRequest;
+    this.exportButton.disabled = !this.xlsx || loading || !!this.exportRequest || locked;
   }
-  retryLoad() { return this.remote ? this.ready = this.remote.retry() : Promise.resolve(false); }
+  retryLoad() { if (this.remoteChanges?.status !== 'refresh' && !this.canLeaveRemote()) return Promise.resolve(false); return this.remote ? this.ready = this.remote.retry() : Promise.resolve(false); }
   reload() {
     if (!this.remote) { this.render(); return Promise.resolve(true); }
+    if (this.remoteChanges?.status !== 'refresh' && !this.canLeaveRemote()) return Promise.resolve(false);
     this.exportRequest?.abort(); return this.ready = this.remote.reload();
   }
   async exportRemoteXLSX({ fileName, scope, sheetName, formulas }) {
+    if (!this.canLeaveRemote()) return false;
     if (!this.remote.source.exportRows) { this.message('서버 전체 다운로드용 dataSource.exportRows를 연결하세요.', true); return false; }
     if (formulas || this.exportRequest) return false;
     const controller = new AbortController(), queryKey = this.remote.queryKey;
@@ -908,11 +1052,13 @@ export class Grid {
     this.pageInput.value = state.total ? this.pageIndex + 1 : 1; this.pageInput.max = Math.max(1, state.pageCount); this.pageInput.disabled = !state.total;
     const prefix = this.dataMode === 'pagination' ? `${state.total ? this.pageIndex + 1 : 0} / ${state.pageCount}페이지 · ` : '';
     this.pageSummary.textContent = `${prefix}${state.total ? state.start + 1 : 0}–${state.end} / ${state.total} 표시 행`;
+    if (this.remoteChanges?.dirty) this.pageSummary.textContent += ` · 편집 중 화면 ${this.model.rows.length}행`;
     if (this.remote) this.updateRemoteControls();
     this.exportScope.querySelector('[value=view]').textContent = this.dataMode === 'pagination' ? '현재 페이지' : this.dataMode === 'infinite' ? '불러온 행' : '현재 표시 행';
   }
 
   setDataMode(mode) {
+    if (!this.canLeaveRemote()) return false;
     if (!DATA_MODES.includes(mode) || this.remote && mode === 'virtual') throw new Error('서버는 infinite/pagination, 로컬은 virtual/infinite/pagination을 사용하세요.');
     if (this.editor && !this.finishEdit()) { this.modeSelect.value = this.dataMode; return false; }
     this.dataMode = mode; this.resetRowWindow(); this.merges = []; this.resetSelection();
@@ -921,6 +1067,7 @@ export class Grid {
     this.options.onDataModeChange?.(this.getPagingState()); return true;
   }
   setPageSize(size) {
+    if (!this.canLeaveRemote()) return false;
     validatePageSize(size);
     if (this.editor && !this.finishEdit()) { this.sizeSelect.value = this.pageSize; return false; }
     if (![...this.sizeSelect.options].some(option => Number(option.value) === size)) { const option = node('option', String(size)); option.value = size; this.sizeSelect.append(option); }
@@ -929,6 +1076,7 @@ export class Grid {
     this.applyRowWindow(); return true;
   }
   setPage(index) {
+    if (!this.canLeaveRemote()) return false;
     if (this.dataMode !== 'pagination') throw new Error('페이지 이동은 페이징 모드에서 사용하세요.');
     if (!Number.isInteger(index) || index < 0 || index >= this.paging.pageCount) { this.pageInput.value = this.pageIndex + 1; this.message('이동할 페이지 범위를 확인하세요.', true); return false; }
     if (this.editor && !this.finishEdit()) return false;
@@ -937,18 +1085,20 @@ export class Grid {
     this.options.onPageChange?.(this.getPagingState()); return true;
   }
   loadMore() {
+    if (!this.canLeaveRemote()) return false;
     if (this.remote && this.dataMode === 'infinite') return this.ready = this.remote.more();
     if (this.dataMode !== 'infinite' || !this.paging.hasMore || this.editor) return false;
     this.loadedLimit = this.paging.end + this.pageSize; this.merges = []; this.applyRowWindow(); return true;
   }
   maybeLoadMore() {
+    if (this.remoteChanges && (this.editor || this.remoteChanges.dirty || this.remoteChanges.locked)) return false;
     if (this.remote && (this.remote.loading || this.remote.error || !this.paging.hasMore)) return false;
     if (this.dataMode !== 'infinite' || this.viewport.clientHeight <= 0 || this.viewport.scrollTop + this.viewport.clientHeight < this.viewport.scrollHeight - this.rowHeight * 2) return false;
     return this.loadMore();
   }
   revealDataRow(index) {
     const position = this.fullResult.display.findIndex(entry => entry.type === 'data' && entry.item.index === index); if (position < 0) return;
-    if (this.dataMode === 'pagination') this.pageIndex = Math.floor(position / this.pageSize);
+    if (!this.remote && this.dataMode === 'pagination') this.pageIndex = Math.floor(position / this.pageSize);
     if (this.dataMode === 'infinite') this.loadedLimit = Math.max(this.loadedLimit, position + 1);
     this.applyRowWindow();
   }
@@ -1046,7 +1196,7 @@ export class Grid {
     if (this.remote) {
       const offset = this.dataMode === 'pagination' ? this.remote.offset : 0, total = this.remote.total ?? 0;
       for (const item of result.view) item.position += offset;
-      result.state = { mode: this.dataMode, pageSize: this.pageSize, pageIndex: Math.floor(offset / this.pageSize), pageCount: Math.ceil(total / this.pageSize), total, totalRows: total, start: offset, end: offset + result.view.length, loaded: result.view.length, hasMore: offset + result.view.length < total, loading: this.remote.loading, error: this.remote.error };
+      result.state = { mode: this.dataMode, pageSize: this.pageSize, pageIndex: Math.floor(offset / this.pageSize), pageCount: Math.ceil(total / this.pageSize), total, totalRows: total, start: offset, end: offset + this.remote.rows.length, loaded: this.remote.rows.length, draftRows: result.view.length, hasMore: offset + this.remote.rows.length < total, loading: this.remote.loading, error: this.remote.error };
     }
     this.view = result.view; this.display = result.display; this.paging = result.state; this.pageIndex = result.state.pageIndex;
     this.virtualRows = this.virtual && this.display.length > 200; this.virtualCols = this.virtual && this.columns.length > 30;
@@ -1065,6 +1215,7 @@ export class Grid {
     this.layout = columnWindow(this.columns, this.viewport.scrollLeft, this.viewport.clientWidth || 800, this.frozenColumns, this.virtualCols);
     const slots = this.layout.slots;
     const hadFocus = this.table.contains(document.activeElement);
+    const changedKeys = new Set(this.getChanges().updated.map(item => String(item.key)));
     const focusedCell = this.cellAt(document.activeElement);
     this.mergeOwners = new Map();
     for (const merge of this.merges) for (let row = merge.row; row < merge.row + merge.rowSpan; row++) for (let col = merge.col; col < merge.col + merge.colSpan; col++) this.mergeOwners.set(`${row}:${col}`, merge);
@@ -1072,7 +1223,7 @@ export class Grid {
     const colgroup = node('colgroup'); colgroup.append(node('col'));
     for (const slot of slots) { const col = node('col'); col.style.width = `${slot.width}px`; if (!slot.gap) col.dataset.field = this.columns[slot.col].field; colgroup.append(col); }
     this.table.append(colgroup);
-    this.table.setAttribute('aria-rowcount', String(this.remote ? this.remote.total == null ? -1 : this.remote.total + 1 : this.display.length + 1)); this.table.setAttribute('aria-colcount', String(this.columns.length + 1));
+    this.table.setAttribute('aria-rowcount', String(this.remote ? this.remote.total == null || this.remoteChanges?.dirty ? -1 : this.remote.total + 1 : this.display.length + 1)); this.table.setAttribute('aria-colcount', String(this.columns.length + 1));
     const head = node('thead'), heading = node('tr'), corner = node('th', '#'); corner.scope = 'col'; heading.append(corner);
     heading.setAttribute('aria-rowindex', '1');
     slots.forEach(slot => {
@@ -1105,6 +1256,7 @@ export class Grid {
       if (descriptor.type !== 'data') { const group = this.renderGroup(descriptor); group.setAttribute('aria-rowindex', String(displayRow + 2)); body.append(group); continue; }
       const { item: { row, ...item }, viewIndex: rowIndex } = descriptor;
       const tr = node('tr'), index = node('th', String(descriptor.item.position + 1)); index.scope = 'row'; tr.append(index);
+      if (this.remoteChanges && (row.__moaClientId || changedKeys.has(String(row[this.remote.rowKey])))) { tr.dataset.state = row.__moaClientId ? 'created' : 'updated'; index.title = row.__moaClientId ? '추가 · 미저장' : '수정 · 미저장'; index.textContent += row.__moaClientId ? ' +' : ' *'; }
       tr.setAttribute('aria-rowindex', String(displayRow + 2 + (this.remote && this.dataMode === 'pagination' ? this.remote.offset : 0)));
       slots.forEach(slot => {
         if (slot.gap) { const gap = node('td'); gap.setAttribute('aria-hidden', 'true'); gap.className = 'moa-grid__gap'; tr.append(gap); return; }
@@ -1144,10 +1296,10 @@ export class Grid {
     this.undoButton.disabled = !this.editable || !this.model.canUndo; this.redoButton.disabled = !this.editable || !this.model.canRedo;
     this.addButton.disabled = !this.editable; this.removeButton.disabled = !this.editable || !this.view.length;
     this.clearButton.disabled = !this.editable; this.mergeButton.disabled = this.unmergeButton.disabled = !!this.remote;
-    this.importButton.disabled = !this.xlsx || !this.editable;
+    this.importButton.disabled = !this.xlsx || !this.editable || !!this.remote;
     this.paintSelection();
     if (hadFocus && focusedCell) (this.cellElement(focusedCell) || this.table).focus({ preventScroll: true });
-    this.message(this.remote ? `${this.view.length}행 표시 · 서버 데이터는 읽기 전용입니다.` : this.view.length ? `${this.view.length}행${this.virtualActive ? ' · 가상 스크롤' : ''} · 셀 더블클릭 또는 F2로 편집` : '표시할 데이터가 없습니다. 검색·필터 조건을 확인하세요.');
+    this.message(this.remoteChanges && !this.editable ? '저장·조회 상태를 확인하세요. 편집은 잠겨 있습니다.' : this.remote && !this.remoteChanges ? `${this.view.length}행 표시 · 서버 데이터는 읽기 전용입니다.` : this.view.length ? `${this.view.length}행${this.virtualActive ? ' · 가상 스크롤' : ''} · 셀 더블클릭 또는 F2로 편집` : '표시할 데이터가 없습니다. 검색·필터 조건을 확인하세요.');
   }
 
   message(text, error = false) { this.status.textContent = text; this.status.classList.toggle('is-error', error); }
@@ -1177,6 +1329,7 @@ export class Grid {
   }
 
   setFilters(filters, { logic = this.filterLogic } = {}) {
+    if (!this.canLeaveRemote()) return false;
     if (!Array.isArray(filters)) throw new Error('filters는 배열이어야 합니다.');
     if (!['and', 'or'].includes(logic)) throw new Error('필터 연결은 and 또는 or여야 합니다.');
     const prepared = filters.map(filter => {
@@ -1204,6 +1357,7 @@ export class Grid {
   }
 
   setSorts(sorts) {
+    if (!this.canLeaveRemote()) return false;
     if (!Array.isArray(sorts) || new Set(sorts.map(sort => sort.field)).size !== sorts.length) throw new Error('중복 없는 정렬 배열이 필요합니다.');
     const prepared = sorts.map(sort => {
       if (!this.columns.some(column => column.field === sort.field)) throw new Error('정렬할 컬럼이 없습니다.');
@@ -1306,11 +1460,11 @@ export class Grid {
 
   addRow(values = {}) {
     if (!this.editable || this.editor && !this.finishEdit()) return false;
-    const row = this.makeRow(values);
+    const row = this.remoteChanges ? this.remoteChanges.newRow(this.makeRow(values)) : this.makeRow(values);
     const index = this.model.rows.length; let changes;
     try { changes = this.mutateModel('insertRows', index, [row]); }
     catch (error) { this.message(error.message, true); return false; }
-    this.query = ''; this.search.value = ''; this.setFilters([]); this.changed(changes, 'insert');
+    if (!this.remote) { this.query = ''; this.search.value = ''; this.setFilters([]); } this.changed(changes, 'insert');
     this.revealDataRow(index);
     const visible = this.view.findIndex(item => item.index === index);
     if (visible >= 0) this.select({ row: visible, col: Math.max(0, this.columns.findIndex(column => column.editable !== false)) });
@@ -1350,6 +1504,7 @@ export class Grid {
   }
 
   async importXLSX(file, options = {}) {
+    if (this.remote) { this.message('서버 데이터는 셀 붙여넣기 또는 행 추가 후 저장하세요.', true); return false; }
     if (!this.editable || this.editor && !this.finishEdit()) return false;
     const revision = this.dataRevision, sequence = ++this.importSequence;
     let rows, changes;
@@ -1365,6 +1520,7 @@ export class Grid {
   }
 
   exportXLSX({ fileName = 'moa-grid.xlsx', scope = 'view', sheetName = '데이터', formulas = false } = {}) {
+    if (this.remoteChanges?.locked) return false;
     if (this.remote?.loading) { this.message('데이터를 불러온 뒤 다운로드하세요.', true); return false; }
     if (this.remote && ['filtered', 'all'].includes(scope)) return this.exportRemoteXLSX({ fileName, scope, sheetName, formulas });
     if (this.editor && !this.finishEdit()) return false;
@@ -1542,9 +1698,10 @@ export class Grid {
   }
   getData({ raw = false } = {}) { return raw ? this.model.getData() : this.model.getComputedData(); }
   mutateModel(method, ...args) { this.localWrite = true; try { return this.model[method](...args); } finally { this.localWrite = false; } }
-  setSearch(query) { clearTimeout(this.searchTimer); if (this.editor) this.cancelEdit(); this.query = String(query); this.search.value = this.query; this.merges = []; this.resetSelection(); this.render(); }
+  setSearch(query) { clearTimeout(this.searchTimer); if (!this.canLeaveRemote()) return false; if (this.editor) this.cancelEdit(); this.query = String(query); this.search.value = this.query; this.merges = []; this.resetSelection(); this.render(); return true; }
   setData(rows) { if (this.remote) throw new Error('서버 데이터는 reload()로 갱신하세요.'); this.resetRowWindow(); this.mutateModel('setData', rows); this.dataRevision++; this.editor = null; this.merges = []; this.resetSelection(); this.render(); }
   downloadCSV() {
+    if (this.remoteChanges?.locked) return false;
     if (this.editor && !this.finishEdit()) return;
     const quote = value => {
       let text = value == null ? '' : String(value);
@@ -1555,7 +1712,7 @@ export class Grid {
     const blob = new Blob(['\uFEFF' + rows.map(row => row.map(quote).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
     this.downloadFile(blob, 'moa-grid.csv'); this.message('검색·정렬된 데이터를 CSV로 내보냈습니다.');
   }
-  destroy() { this.destroyed = true; clearTimeout(this.searchTimer); this.remote?.dispose(); this.exportRequest?.abort(); this.editor = null; this.resizeObserver.disconnect(); this.unsubscribe?.(); cancelAnimationFrame(this.scrollFrame); this.events.abort(); this.root.remove(); }
+  destroy() { this.destroyed = true; clearTimeout(this.searchTimer); this.remote?.dispose(); this.remoteChanges?.dispose(); this.exportRequest?.abort(); this.editor = null; this.resizeObserver.disconnect(); this.unsubscribe?.(); cancelAnimationFrame(this.scrollFrame); this.events.abort(); this.root.remove(); }
 }
 
 export default Grid;

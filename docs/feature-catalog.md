@@ -1,6 +1,6 @@
 # RealGrid 참고 기능 카탈로그
 
-확인일: 2026-11-15 · 참고 릴리스: RealGrid2 2.10.2 (2026-10-22) · 총 171개 후보
+확인일: 2026-11-16 · 참고 릴리스: RealGrid2 2.10.2 (2026-10-22) · 총 171개 후보
 
 공식 가이드 기반 1차 기능 후보 목록. 모든 API·옵션·버전 차이의 완전한 조사 또는 호환성 인증이 아님.
 
@@ -21,8 +21,8 @@
 | 상태 | 항목 수 |
 | --- | ---: |
 | 초기 구현 | 49 |
-| 일부 구현 | 17 |
-| 계획 | 105 |
+| 일부 구현 | 19 |
+| 계획 | 103 |
 
 중요한 구분과 구현 순서는 [로드맵](roadmap.md), 사용자 지정 단축키는 [셀 조작 계약](grid-interaction-contract.md)을 참고한다.
 
@@ -42,8 +42,8 @@
 | BASE-010 | 행 추가·삽입 | M1 | 초기 구현 | 행 기본값과 추가·삽입을 지원하고 한 번의 Undo/Redo로 복원 | [목차 확인](https://docs.realgrid.com/guides/crud/insert) |
 | BASE-011 | 행 삭제 | M1 | 초기 구현 | 표시 좌표를 원본 행으로 매핑하여 삭제; 트리 부모는 자손까지 한 번에 처리 | [목차 확인](https://docs.realgrid.com/guides/crud/delete) |
 | BASE-012 | 행 단위 수정 | M1 | 계획 | 한 행의 여러 필드를 하나의 트랜잭션으로 변경 | [목차 확인](https://docs.realgrid.com/guides/crud/update) |
-| BASE-013 | 행 변경 상태 | M1 | 계획 | 추가·수정·삭제 상태와 서버 저장 후 기준점 재설정 | [본문 검토](https://docs.realgrid.com/guides/editing/row-states) |
-| BASE-014 | 원본 롤백 | M1 | 계획 | Undo와 별도로 마지막 저장 기준점으로 복원 | [목차 확인](https://docs.realgrid.com/guides/data-manager/data-rollback) |
+| BASE-013 | 행 변경 상태 | M1 | 일부 구현 | 서버 save 모드의 추가·수정·삭제 차이와 저장 후 기준점 재설정; RealGrid 행 상태 API·soft delete는 후속 | [본문 검토](https://docs.realgrid.com/guides/editing/row-states) |
+| BASE-014 | 원본 롤백 | M1 | 일부 구현 | 서버 save 모드의 미저장 변경 취소·최신 버전 재조회; 로컬/RealGrid 롤백 API는 후속 | [목차 확인](https://docs.realgrid.com/guides/data-manager/data-rollback) |
 | BASE-015 | 계산 필드 | M2 | 계획 | 콜백 기반 파생값 재계산 및 읽기 전용 처리 | [본문 검토](https://docs.realgrid.com/guides/data-manager/calc-field) |
 | BASE-016 | Provider 공유 | M2 | 계획 | 두 그리드가 같은 모델을 구독하고 해제 후 누수 없음 | [목차 확인](https://docs.realgrid.com/guides/fill-data/provider-sharing) |
 | BASE-017 | 마스터·디테일 | M2 | 계획 | 상위 선택으로 상세 데이터 교체; 미확정 편집 처리 | [목차 확인](https://docs.realgrid.com/guides/fill-data/master-detail) |

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "checkedAt": "2026-11-15",
+  "checkedAt": "2026-11-16",
   "projectName": "Moa JS (working name)",
   "baseline": {
     "product": "RealGrid2",
@@ -210,24 +210,24 @@
       "category": "BASE",
       "name": "행 변경 상태",
       "phase": "M1",
-      "status": "planned",
+      "status": "partial",
       "evidence": "body-reviewed",
       "sources": [
         "https://docs.realgrid.com/guides/editing/row-states"
       ],
-      "acceptance": "추가·수정·삭제 상태와 서버 저장 후 기준점 재설정"
+      "acceptance": "서버 save 모드의 추가·수정·삭제 차이와 저장 후 기준점 재설정; RealGrid 행 상태 API·soft delete는 후속"
     },
     {
       "id": "BASE-014",
       "category": "BASE",
       "name": "원본 롤백",
       "phase": "M1",
-      "status": "planned",
+      "status": "partial",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/data-manager/data-rollback"
       ],
-      "acceptance": "Undo와 별도로 마지막 저장 기준점으로 복원"
+      "acceptance": "서버 save 모드의 미저장 변경 취소·최신 버전 재조회; 로컬/RealGrid 롤백 API는 후속"
     },
     {
       "id": "BASE-015",
