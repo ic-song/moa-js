@@ -1,6 +1,6 @@
 # RealGrid 참고 기능 카탈로그
 
-확인일: 2026-11-15 · 참고 릴리스: RealGrid2 2.10.2 (2026-10-22) · 총 170개 후보
+확인일: 2026-11-15 · 참고 릴리스: RealGrid2 2.10.2 (2026-10-22) · 총 171개 후보
 
 공식 가이드 기반 1차 기능 후보 목록. 모든 API·옵션·버전 차이의 완전한 조사 또는 호환성 인증이 아님.
 
@@ -13,16 +13,16 @@
 | 단계 | 의미 | 항목 수 |
 | --- | --- | ---: |
 | M0 | 핵심 셀 조작 | 34 |
-| M1 | 업무 적용 | 45 |
+| M1 | 업무 적용 | 46 |
 | M2 | 고급 그리드 | 51 |
 | M3 | 특수 기능 | 34 |
 | LATER | 독립 확장 후보 | 6 |
 
 | 상태 | 항목 수 |
 | --- | ---: |
-| 초기 구현 | 46 |
+| 초기 구현 | 48 |
 | 일부 구현 | 17 |
-| 계획 | 107 |
+| 계획 | 106 |
 
 중요한 구분과 구현 순서는 [로드맵](roadmap.md), 사용자 지정 단축키는 [셀 조작 계약](grid-interaction-contract.md)을 참고한다.
 
@@ -128,7 +128,7 @@
 | QUERY-006 | 필터 목록 순서 | M2 | 계획 | 표시 순서와 빈 값 위치 제어 | [목차 확인](https://docs.realgrid.com/guides/column/filter-selector-data-order) |
 | QUERY-007 | 전체 문자열 검색 | M0 | 초기 구현 | 현재 구현은 전체 열 포함 검색; RealGrid 검색 API와는 별도 | [목차 확인](https://docs.realgrid.com/guides/data-manager/search-item) |
 | QUERY-008 | 셀 검색·다음 결과 이동 | M1 | 계획 | 대소문자·부분일치·역방향·순환 검색 | [목차 확인](https://docs.realgrid.com/guides/data-manager/search-item) |
-| QUERY-009 | 로컬 페이징 | M1 | 계획 | 선택·원본 행 매핑과 페이지 경계 이동 | [목차 확인](https://docs.realgrid.com/guides/paging/paging1) |
+| QUERY-009 | 로컬 페이징 | M1 | 초기 구현 | 로컬 표시행 페이징·페이지 크기/번호 이동·원본 매핑·마지막 페이지 삭제 보정·선택/Undo 검증 | [목차 확인](https://docs.realgrid.com/guides/paging/paging1) |
 | QUERY-010 | 서버 페이징 연동 | M2 | 계획 | 호스트 요청 콜백 제공; 그리드 자체 외부 접속 없음 | [목차 확인](https://docs.realgrid.com/guides/paging/paging3) |
 
 ## 헤더·푸터·그룹·집계
@@ -192,7 +192,7 @@
 
 | ID | 기능 | 단계 | 상태 | 완료 판정 | 근거 |
 | --- | --- | --- | --- | --- | --- |
-| EXPORT-001 | XLSX 내보내기 | M1 | 초기 구현 | 실제 xlsx ZIP 생성과 로컬 저장; 열 너비·기본 값 타입·표시 병합 포함 | [본문 검토](https://docs.realgrid.com/guides/excels/excel-export) |
+| EXPORT-001 | XLSX 내보내기 | M1 | 초기 구현 | 로컬 XLSX 다운로드: 현재 페이지/불러온 행·검색정렬 결과·전체·선택 범위, 숫자/한글/빈 결과·오프라인 검증 | [본문 검토](https://docs.realgrid.com/guides/excels/excel-export) |
 | EXPORT-002 | XLSX 가져오기 | M1 | 초기 구현 | 로컬 파일 첫 시트 또는 지정 시트, 헤더 매핑·타입·검증·전체 Undo/Redo | [본문 검토](https://docs.realgrid.com/guides/tip/excel-import) |
 | EXPORT-003 | 그룹·소계 내보내기 | M2 | 계획 | 그룹 구조와 집계값 보존 | [목차 확인](https://docs.realgrid.com/guides/excels/row-group-export) |
 | EXPORT-004 | 복합 레이아웃 내보내기 | M3 | 계획 | 다단 헤더·병합 범위 보존 | [목차 확인](https://docs.realgrid.com/guides/excels/layout-export) |
@@ -244,6 +244,7 @@
 | EXT-014 | 붙여넣기 자동 행 확장 | M0 | 초기 구현 | 일반 무필터 모드에서 빈 표·마지막 행 이후 붙여넣기를 한 번에 적용·Undo/Redo | 자체 요구 |
 | EXT-015 | 행·파일 단위 변경 이력 | M1 | 초기 구현 | 행 추가·삭제·XLSX 데이터 교체를 단일 트랜잭션으로 되돌리기·다시 실행 | 자체 요구 |
 | EXT-016 | 수동 사각형 셀 병합 | M2 | 초기 구현 | 일반 모드에서 가로·세로 병합·해제; 숨겨진 데이터 보존과 붙여넣기 차단 | 자체 요구 |
+| EXT-017 | 무한 스크롤·표시 방식 선택 | M1 | 초기 구현 | 로컬 데이터 하단 도달/더보기·종료 상태·가상화 연계·가상/무한/페이징 전환; 서버 요청 제외 | 자체 요구 |
 
 ## 별도 제품·연동 후보
 

@@ -23,3 +23,5 @@
 실제 비교 시험을 추가할 때는 대상 RealGrid 버전과 실제 프로젝트에서 사용하는 API 목록을 먼저 고정하고, 같은 데이터·설정·입력을 양쪽에 적용해 결과를 기록합니다. 현재 자동 검증은 Moa 자체 모델·브라우저, 실제 Excel 생성 파일·복사 데이터와 로컬 배포물에 한정합니다. 검증한 범위는 [verification.md](verification.md)에 명시합니다.
 
 0.3.0의 [공개 API 일부 이행 지원표](realgrid-api-subset.md)는 지원 메서드·인수와 미지원 오류를 정의합니다. 수식은 [독립 확장 API](grid-advanced.md)이며 RealGrid의 계산 필드/엑셀 수식 설정과 동일한 API가 아닙니다.
+
+0.4.0은 자체 dataMode API로 가상/로컬 무한/로컬 페이징 전환과 Excel 범위 다운로드를 제공합니다. RealGrid setPaging API나 서버 요청을 구현한 것은 아닙니다. [자체 API](data-modes.md)를 확인하세요.

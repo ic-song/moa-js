@@ -1,4 +1,4 @@
-/*! Moa JS Grid v0.3.0 | MIT License | See LICENSE */
+/*! Moa JS Grid v0.4.0 | MIT License | See LICENSE */
 // A bounded expression parser. No JavaScript evaluation or property access.
 class FormulaFault extends Error { constructor(code) { super(code); this.code = code; } }
 const fault = code => { throw new FormulaFault(code); };
@@ -568,6 +568,26 @@ export function columnWindow(columns, scrollLeft, width, frozen = 0, virtual = t
   return { slots, offsets, total: offsets.at(-1) };
 }
 
+export const DATA_MODES = ['virtual', 'infinite', 'pagination'];
+export function validatePageSize(size) {
+  if (!Number.isInteger(size) || size < 1 || size > 10000) throw new Error('페이지 크기는 1~10,000의 정수여야 합니다.');
+  return size;
+}
+export function rowWindow(result, { mode = 'virtual', pageSize = 100, pageIndex = 0, loaded = pageSize } = {}) {
+  if (!DATA_MODES.includes(mode)) throw new Error('표시 방식은 virtual, infinite, pagination 중 선택하세요.');
+  validatePageSize(pageSize);
+  const total = result.display.length, pageCount = Math.ceil(total / pageSize);
+  pageIndex = Math.max(0, Math.min(pageCount - 1, pageIndex));
+  const start = mode === 'pagination' ? pageIndex * pageSize : 0;
+  const end = Math.min(total, mode === 'pagination' ? start + pageSize : mode === 'infinite' ? Math.max(pageSize, loaded) : total);
+  const view = [], display = result.display.slice(start, end).map(entry => {
+    if (entry.type !== 'data') return entry;
+    const item = { ...entry.item, position: entry.viewIndex };
+    view.push(item); return { ...entry, item, viewIndex: view.length - 1 };
+  });
+  return { view, display, state: { mode, pageSize, pageIndex, pageCount, total, totalRows: result.view.length, start, end, loaded: end, hasMore: end < total } };
+}
+
 
 let gridSequence = 0;
 
@@ -586,6 +606,9 @@ export class Grid {
     this.model = options.model || new GridModel(options.columns, options.data || [], options);
     this.columns = options.model ? options.columns.map(column => ({ ...column })) : this.model.columns;
     this.virtual = options.virtual !== false; this.rowHeight = 48;
+    this.dataMode = options.dataMode || 'virtual';
+    if (!DATA_MODES.includes(this.dataMode)) throw new Error('올바른 dataMode가 필요합니다.');
+    this.pageSize = validatePageSize(options.pageSize ?? 100); this.pageIndex = 0; this.loadedLimit = this.pageSize;
     this.anchor = { row: 0, col: 0 }; this.current = { ...this.anchor };
     this.query = ''; this.sorts = []; this.filters = []; this.filterLogic = 'and'; this.groupBy = []; this.tree = null;
     this.collapsedGroups = new Set(); this.collapsedNodes = new Set(); this.merges = []; this.mergeOwners = new Map();
@@ -617,7 +640,11 @@ export class Grid {
     this.fileInput = node('input'); this.fileInput.type = 'file'; this.fileInput.accept = '.xlsx'; this.fileInput.hidden = true;
     this.fileInput.addEventListener('change', async () => { const file = this.fileInput.files[0]; if (file) await this.importXLSX(file); this.fileInput.value = ''; }, { signal });
     this.importButton = button('XLSX 가져오기', () => this.fileInput.click());
-    this.exportButton = button('XLSX 내보내기', () => this.exportXLSX());
+    const exportLabel = node('label', '다운로드 범위 ', 'moa-grid__option'); this.exportScope = node('select'); this.exportScope.setAttribute('aria-label', '엑셀 다운로드 범위');
+    for (const [value, title] of [['view', '현재 표시 행'], ['filtered', '검색·정렬 결과'], ['all', '전체 데이터'], ['selection', '선택 영역']]) { const option = node('option', title); option.value = value; this.exportScope.append(option); }
+    exportLabel.append(this.exportScope); this.toolbar.append(exportLabel);
+    this.exportButton = button('엑셀 다운로드', () => this.exportXLSX({ scope: this.exportScope.value }));
+    this.exportButton.title = this.xlsx ? '선택한 범위를 .xlsx 파일로 다운로드' : '로컬 SheetJS 모듈을 먼저 로드하세요.';
     this.importButton.disabled = !this.xlsx || !this.editable; this.exportButton.disabled = !this.xlsx;
     const frozenLabel = node('label', '고정 열 ', 'moa-grid__option'); this.frozenSelect = node('select');
     this.frozenSelect.setAttribute('aria-label', '고정 열');
@@ -628,6 +655,9 @@ export class Grid {
     const noGroup = node('option', '없음'); noGroup.value = ''; this.groupSelect.append(noGroup);
     for (const column of this.columns) { const option = node('option', column.header || column.field); option.value = column.field; this.groupSelect.append(option); }
     this.groupSelect.addEventListener('change', () => this.setGroupBy(this.groupSelect.value ? [this.groupSelect.value] : []), { signal }); groupLabel.append(this.groupSelect); this.toolbar.append(groupLabel);
+    const modeLabel = node('label', '표시 방식 ', 'moa-grid__option'); this.modeSelect = node('select'); this.modeSelect.setAttribute('aria-label', '표시 방식');
+    for (const [value, title] of [['virtual', '가상 스크롤'], ['infinite', '무한 스크롤'], ['pagination', '페이징']]) { const option = node('option', title); option.value = value; this.modeSelect.append(option); }
+    this.modeSelect.value = this.dataMode; this.modeSelect.addEventListener('change', () => this.setDataMode(this.modeSelect.value), { signal }); modeLabel.append(this.modeSelect); this.toolbar.append(modeLabel);
     this.coordinate = node('span', '', 'moa-grid__coordinate'); this.toolbar.append(this.coordinate);
     this.filterPanel = this.createFilterPanel();
     this.viewport = node('div', null, 'moa-grid__viewport');
@@ -636,7 +666,8 @@ export class Grid {
     this.viewport.append(this.table);
     this.status = node('div', '', 'moa-grid__status'); this.status.setAttribute('role', 'status'); this.status.setAttribute('aria-live', 'polite');
     this.status.id = `moa-grid-status-${++gridSequence}`;
-    this.root.append(this.toolbar, this.filterPanel, this.viewport, this.status, this.fileInput); this.host.append(this.root);
+    this.navigation = this.createNavigation();
+    this.root.append(this.toolbar, this.filterPanel, this.viewport, this.navigation, this.status, this.fileInput); this.host.append(this.root);
     this.table.addEventListener('keydown', event => this.onKey(event), { signal });
     this.table.addEventListener('dblclick', event => { const cell = this.cellAt(event.target); if (cell) this.startEdit(cell); }, { signal });
     this.table.addEventListener('beforeinput', event => {
@@ -659,16 +690,20 @@ export class Grid {
     }, { signal });
     document.addEventListener('pointerup', () => { this.resizing = null; }, { signal });
     this.viewport.addEventListener('scroll', () => {
-      if (!this.virtualActive || this.editor) return;
-      if (!this.scrollFrame) this.scrollFrame = requestAnimationFrame(() => { this.scrollFrame = 0; if (!this.destroyed && !this.editor) this.renderViewport(); });
+      if (this.editor || (!this.virtualActive && this.dataMode !== 'infinite')) return;
+      if (!this.scrollFrame) this.scrollFrame = requestAnimationFrame(() => {
+        this.scrollFrame = 0; if (this.destroyed || this.editor) return;
+        if (!this.maybeLoadMore() && this.virtualActive) this.renderViewport();
+      });
     }, { signal });
-    this.unsubscribe = this.model.subscribe(() => {
+    this.unsubscribe = this.model.subscribe(({ reason }) => {
       if (this.localWrite || this.destroyed) return;
       this.dataRevision++;
       if (this.editor) { this.message('외부 데이터가 변경됐습니다. 편집을 취소하고 다시 입력하세요.', true); return; }
+      if (reason === 'reset') { this.resetRowWindow(); this.resetSelection(); }
       this.merges = []; this.render();
     });
-    this.resizeObserver = new ResizeObserver(() => { if (this.virtualActive && !this.editor) this.renderViewport(); else this.updateColumnGeometry(); }); this.resizeObserver.observe(this.viewport);
+    this.resizeObserver = new ResizeObserver(() => { if (this.virtualActive && !this.editor) this.renderViewport(); else this.updateColumnGeometry(); if (!this.editor) this.maybeLoadMore(); }); this.resizeObserver.observe(this.viewport);
     this.table.addEventListener('copy', event => {
       if (this.editor || !event.clipboardData || !this.view.length) return;
       event.clipboardData.setData('text/plain', this.copySelection());
@@ -707,6 +742,70 @@ export class Grid {
   }
 
   get editable() { return this.model.editable && this.options.editable !== false; }
+
+  createNavigation() {
+    const region = node('div', null, 'moa-grid__navigation'); region.setAttribute('role', 'group'); region.setAttribute('aria-label', '데이터 탐색');
+    const label = node('label', '표시 행 수 ', 'moa-grid__option'); this.sizeSelect = node('select'); this.sizeSelect.setAttribute('aria-label', '표시 행 수');
+    for (const size of [...new Set([25, 50, 100, 200, 500, this.pageSize])].sort((a, b) => a - b)) { const option = node('option', String(size)); option.value = size; this.sizeSelect.append(option); }
+    this.sizeSelect.value = this.pageSize; this.sizeSelect.addEventListener('change', () => this.setPageSize(Number(this.sizeSelect.value))); label.append(this.sizeSelect); region.append(label);
+    this.pageControls = node('div', null, 'moa-grid__page-controls');
+    const button = (title, action, parent = this.pageControls) => { const control = node('button', title); control.type = 'button'; control.addEventListener('click', action); parent.append(control); return control; };
+    this.firstPage = button('처음', () => this.setPage(0)); this.previousPage = button('이전', () => this.setPage(this.pageIndex - 1));
+    this.pageForm = node('form'); const pageLabel = node('label', '페이지 ', 'moa-grid__option'); this.pageInput = node('input'); this.pageInput.type = 'number'; this.pageInput.min = '1'; this.pageInput.step = '1'; this.pageInput.setAttribute('aria-label', '이동할 페이지'); pageLabel.append(this.pageInput); this.pageForm.append(pageLabel);
+    const go = node('button', '이동'); go.type = 'submit'; this.pageForm.append(go); this.pageForm.addEventListener('submit', event => { event.preventDefault(); this.setPage(Number(this.pageInput.value) - 1); }); this.pageControls.append(this.pageForm);
+    this.nextPage = button('다음', () => this.setPage(this.pageIndex + 1)); this.lastPage = button('마지막', () => this.setPage(this.paging.pageCount - 1));
+    this.moreButton = button('더 불러오기', () => this.loadMore(), region);
+    this.pageSummary = node('span', '', 'moa-grid__page-summary'); this.pageSummary.setAttribute('role', 'status'); this.pageSummary.setAttribute('aria-live', 'polite');
+    region.append(this.pageControls, this.pageSummary); return region;
+  }
+
+  resetRowWindow() { this.pageIndex = 0; this.loadedLimit = this.pageSize; this.viewport.scrollTop = 0; }
+  getPagingState() { return { ...this.paging }; }
+  updateNavigation() {
+    const state = this.paging; this.modeSelect.value = this.dataMode; this.sizeSelect.value = this.pageSize;
+    this.navigation.hidden = this.dataMode === 'virtual'; this.pageControls.hidden = this.dataMode !== 'pagination'; this.moreButton.hidden = this.dataMode !== 'infinite';
+    this.moreButton.disabled = !state.hasMore; this.moreButton.textContent = state.hasMore ? '더 불러오기' : '모두 불러왔습니다';
+    this.firstPage.disabled = this.previousPage.disabled = !state.total || !this.pageIndex;
+    this.nextPage.disabled = this.lastPage.disabled = !state.total || this.pageIndex >= state.pageCount - 1;
+    this.pageInput.value = state.total ? this.pageIndex + 1 : 1; this.pageInput.max = Math.max(1, state.pageCount); this.pageInput.disabled = !state.total;
+    const prefix = this.dataMode === 'pagination' ? `${state.total ? this.pageIndex + 1 : 0} / ${state.pageCount}페이지 · ` : '';
+    this.pageSummary.textContent = `${prefix}${state.total ? state.start + 1 : 0}–${state.end} / ${state.total} 표시 행`;
+    this.exportScope.querySelector('[value=view]').textContent = this.dataMode === 'pagination' ? '현재 페이지' : this.dataMode === 'infinite' ? '불러온 행' : '현재 표시 행';
+  }
+
+  setDataMode(mode) {
+    if (!DATA_MODES.includes(mode)) throw new Error('표시 방식은 virtual, infinite, pagination 중 선택하세요.');
+    if (this.editor && !this.finishEdit()) { this.modeSelect.value = this.dataMode; return false; }
+    this.dataMode = mode; this.resetRowWindow(); this.merges = []; this.resetSelection(); this.applyRowWindow();
+    this.options.onDataModeChange?.(this.getPagingState()); return true;
+  }
+  setPageSize(size) {
+    validatePageSize(size);
+    if (this.editor && !this.finishEdit()) { this.sizeSelect.value = this.pageSize; return false; }
+    if (![...this.sizeSelect.options].some(option => Number(option.value) === size)) { const option = node('option', String(size)); option.value = size; this.sizeSelect.append(option); }
+    this.pageSize = size; this.resetRowWindow(); this.merges = []; this.resetSelection(); this.applyRowWindow(); return true;
+  }
+  setPage(index) {
+    if (this.dataMode !== 'pagination') throw new Error('페이지 이동은 페이징 모드에서 사용하세요.');
+    if (!Number.isInteger(index) || index < 0 || index >= this.paging.pageCount) { this.pageInput.value = this.pageIndex + 1; this.message('이동할 페이지 범위를 확인하세요.', true); return false; }
+    if (this.editor && !this.finishEdit()) return false;
+    this.pageIndex = index; this.viewport.scrollTop = 0; this.merges = []; this.resetSelection(); this.applyRowWindow();
+    this.options.onPageChange?.(this.getPagingState()); return true;
+  }
+  loadMore() {
+    if (this.dataMode !== 'infinite' || !this.paging.hasMore || this.editor) return false;
+    this.loadedLimit = this.paging.end + this.pageSize; this.merges = []; this.applyRowWindow(); return true;
+  }
+  maybeLoadMore() {
+    if (this.dataMode !== 'infinite' || this.viewport.clientHeight <= 0 || this.viewport.scrollTop + this.viewport.clientHeight < this.viewport.scrollHeight - this.rowHeight * 2) return false;
+    return this.loadMore();
+  }
+  revealDataRow(index) {
+    const position = this.fullResult.display.findIndex(entry => entry.type === 'data' && entry.item.index === index); if (position < 0) return;
+    if (this.dataMode === 'pagination') this.pageIndex = Math.floor(position / this.pageSize);
+    if (this.dataMode === 'infinite') this.loadedLimit = Math.max(this.loadedLimit, position + 1);
+    this.applyRowWindow();
+  }
 
   cellAt(target) {
     const cell = target.closest?.('td[data-row]');
@@ -778,18 +877,28 @@ export class Grid {
       cell.classList.toggle('is-selected', selected); cell.classList.toggle('is-active', active);
       cell.setAttribute('aria-selected', String(selected)); cell.tabIndex = active ? 0 : -1;
     }
-    this.coordinate.textContent = this.view.length ? `${this.current.row + 1}행 ${this.current.col + 1}열 · ${(range.bottom - range.top + 1) * (range.right - range.left + 1)}셀 선택` : '선택 없음';
+    this.coordinate.textContent = this.view.length ? `${(this.view[this.current.row]?.position ?? this.current.row) + 1}행 ${this.current.col + 1}열 · ${(range.bottom - range.top + 1) * (range.right - range.left + 1)}셀 선택` : '선택 없음';
   }
 
   render() {
-    const result = buildDisplay(this.model.formulas ? this.model.getComputedData() : this.model.rows, this); this.view = result.view; this.display = result.display;
+    const signature = JSON.stringify([this.query, this.filters, this.filterLogic, this.sorts, this.groupBy, this.tree, [...this.collapsedGroups], [...this.collapsedNodes]]);
+    if (this.viewSignature != null && this.viewSignature !== signature) this.resetRowWindow();
+    this.viewSignature = signature;
+    this.fullResult = buildDisplay(this.model.formulas ? this.model.getComputedData() : this.model.rows, this);
+    this.applyRowWindow();
+  }
+
+  applyRowWindow() {
+    const result = rowWindow(this.fullResult, { mode: this.dataMode, pageSize: this.pageSize, pageIndex: this.pageIndex, loaded: this.loadedLimit });
+    this.view = result.view; this.display = result.display; this.paging = result.state; this.pageIndex = result.state.pageIndex;
     this.virtualRows = this.virtual && this.display.length > 200; this.virtualCols = this.virtual && this.columns.length > 30;
     this.virtualActive = this.virtualRows || this.virtualCols;
     if (this.virtualActive) this.merges = [];
 
-    this.root.classList.toggle('moa-grid--virtual', this.virtualActive);
+    // Keep geometry stable when an infinite window crosses the virtualization threshold.
+    this.root.classList.toggle('moa-grid--virtual', this.virtualActive || this.dataMode === 'infinite');
     this.displayIndex = new Map(); this.display.forEach((entry, index) => { if (entry.type === 'data') this.displayIndex.set(entry.viewIndex, index); });
-    this.renderViewport();
+    this.updateNavigation(); this.renderViewport();
   }
 
   renderViewport() {
@@ -836,7 +945,7 @@ export class Grid {
       const descriptor = this.display[displayRow];
       if (descriptor.type !== 'data') { const group = this.renderGroup(descriptor); group.setAttribute('aria-rowindex', String(displayRow + 2)); body.append(group); continue; }
       const { item: { row, ...item }, viewIndex: rowIndex } = descriptor;
-      const tr = node('tr'), index = node('th', String(rowIndex + 1)); index.scope = 'row'; tr.append(index);
+      const tr = node('tr'), index = node('th', String(descriptor.item.position + 1)); index.scope = 'row'; tr.append(index);
       tr.setAttribute('aria-rowindex', String(displayRow + 2));
       slots.forEach(slot => {
         if (slot.gap) { const gap = node('td'); gap.setAttribute('aria-hidden', 'true'); gap.className = 'moa-grid__gap'; tr.append(gap); return; }
@@ -847,7 +956,7 @@ export class Grid {
         if (owner) { td.rowSpan = owner.rowSpan; td.colSpan = owner.colSpan; }
         td.dataset.row = rowIndex; td.dataset.col = col; td.setAttribute('aria-colindex', String(col + 2));
         if (this.model.formulas) { const result = this.model.formulaSheet().cell(item.index, this.model.columns.findIndex(item => item.field === column.field)); if (result.error) { td.classList.add('is-formula-error'); td.title = result.error; } }
-        td.setAttribute('aria-label', `${rowIndex + 1}행 ${column.header || column.field}`);
+        td.setAttribute('aria-label', `${descriptor.item.position + 1}행 ${column.header || column.field}`);
         const readonly = !this.editable || column.editable === false;
         td.setAttribute('aria-readonly', String(readonly)); td.classList.toggle('is-readonly', readonly);
         if (column.type === 'number') td.classList.add('is-number');
@@ -1039,6 +1148,7 @@ export class Grid {
     try { changes = this.mutateModel('insertRows', index, [row]); }
     catch (error) { this.message(error.message, true); return false; }
     this.query = ''; this.search.value = ''; this.setFilters([]); this.changed(changes, 'insert');
+    this.revealDataRow(index);
     const visible = this.view.findIndex(item => item.index === index);
     if (visible >= 0) this.select({ row: visible, col: Math.max(0, this.columns.findIndex(column => column.editable !== false)) });
     return true;
@@ -1087,16 +1197,23 @@ export class Grid {
       if (revision !== this.dataRevision) throw new Error('파일을 읽는 동안 데이터가 변경됐습니다. 다시 가져오세요.');
       rows = readXLSX(bytes, this.xlsx, this.columns, { formulas: this.model.formulas, ...options }); changes = this.mutateModel('replaceRows', rows, 'import');
     } catch (error) { this.message(error.message, true); return false; }
-    this.query = ''; this.search.value = ''; this.setFilters([]); this.changed(changes, 'import'); this.message(`${rows.length}행 XLSX 가져오기 완료 · Ctrl+Z로 원복`); return true;
+    this.resetRowWindow(); this.query = ''; this.search.value = ''; this.setFilters([]); this.changed(changes, 'import'); this.message(`${rows.length}행 XLSX 가져오기 완료 · Ctrl+Z로 원복`); return true;
   }
 
   exportXLSX({ fileName = 'moa-grid.xlsx', scope = 'view', sheetName = '데이터', formulas = false } = {}) {
     if (this.editor && !this.finishEdit()) return false;
     try {
-      if (!['view', 'all'].includes(scope)) throw new Error('내보내기 scope는 view 또는 all이어야 합니다.');
+      if (!['view', 'filtered', 'all', 'selection'].includes(scope)) throw new Error('내보내기 scope는 view, filtered, all, selection 중 선택하세요.');
       if (formulas && (!this.model.formulas || scope !== 'all')) throw new Error('수식 보존은 formulas 모드에서 scope: all로 내보내세요.');
-      const rows = scope === 'all' ? this.getData({ raw: formulas }) : this.view.map(item => item.row);
-      const bytes = writeXLSX(rows, this.xlsx, this.columns, { sheetName, merges: scope === 'view' ? this.merges : [], formulas });
+      let columns = this.columns, merges = scope === 'view' ? this.merges : [];
+      let rows = scope === 'all' ? this.getData({ raw: formulas }) : scope === 'filtered' ? this.fullResult.view.map(item => item.row) : this.view.map(item => item.row);
+      if (scope === 'filtered' && this.dataMode === 'virtual') merges = this.merges;
+      if (scope === 'selection') {
+        if (!this.view.length) throw new Error('다운로드할 셀을 선택하세요.');
+        const range = this.getSelection(); columns = this.columns.slice(range.left, range.right + 1); rows = rows.slice(range.top, range.bottom + 1);
+        merges = this.merges.filter(merge => this.intersects(range, merge)).map(merge => ({ ...merge, row: merge.row - range.top, col: merge.col - range.left }));
+      }
+      const bytes = writeXLSX(rows, this.xlsx, columns, { sheetName, merges, formulas });
       this.downloadFile(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileName);
       this.message(`${rows.length}행 XLSX 내보내기 완료`); return true;
     } catch (error) { this.message(error.message, true); return false; }
@@ -1215,7 +1332,7 @@ export class Grid {
       if (!width || range.left + width > this.columns.length || height * width > 100000) throw new Error('붙여넣을 데이터가 그리드 범위를 벗어나거나 너무 큽니다.');
       const extra = Math.max(0, range.top + height - this.view.length);
       if (extra && !this.columns.slice(range.left, range.left + width).some(column => column.editable !== false)) throw new Error('읽기 전용 셀에는 행을 추가해 붙여넣을 수 없습니다.');
-      if (extra && (this.options.pasteAppend === false || this.query.trim() || this.filters.length || this.groupBy.length || this.tree)) throw new Error('행 범위를 넘었습니다. 일반 모드에서 검색·필터를 해제하거나 행을 추가하세요.');
+      if (extra && (this.dataMode !== 'virtual' || this.options.pasteAppend === false || this.query.trim() || this.filters.length || this.groupBy.length || this.tree)) throw new Error('행 범위를 넘었습니다. 가상 스크롤 모드에서 검색·필터를 해제하거나 행을 추가하세요.');
       if (extra) {
         const candidate = this.model.getData(), originalCount = candidate.length;
         for (let index = 0; index < extra; index++) candidate.push(this.makeRow({}, index));
@@ -1254,7 +1371,7 @@ export class Grid {
   getData({ raw = false } = {}) { return raw ? this.model.getData() : this.model.getComputedData(); }
   mutateModel(method, ...args) { this.localWrite = true; try { return this.model[method](...args); } finally { this.localWrite = false; } }
   setSearch(query) { if (this.editor) this.cancelEdit(); this.query = String(query); this.search.value = this.query; this.merges = []; this.resetSelection(); this.render(); }
-  setData(rows) { this.mutateModel('setData', rows); this.dataRevision++; this.editor = null; this.merges = []; this.resetSelection(); this.render(); }
+  setData(rows) { this.resetRowWindow(); this.mutateModel('setData', rows); this.dataRevision++; this.editor = null; this.merges = []; this.resetSelection(); this.render(); }
   downloadCSV() {
     if (this.editor && !this.finishEdit()) return;
     const quote = value => {

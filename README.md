@@ -4,7 +4,15 @@
 
 코어는 외부 런타임 의존성·CDN·웹폰트·온라인 인증·텔레메트리 없이 실행합니다. XLSX 파일 기능에는 로컬 동봉한 SheetJS Community Edition을 선택적으로 사용합니다. 프레임워크와 분리된 JS·CSS 파일을 제공하며 Moa 자체 코드는 상업적 사용과 수정·재배포가 가능한 MIT 라이선스입니다. 동봉 라이브러리는 [별도 Apache-2.0 라이선스](packages/grid/THIRD_PARTY_NOTICES.md)를 유지합니다.
 
-현재 **0.3.0**으로 Excel 조작·XLSX·그룹/트리에 행·열 가상 스크롤, A1 수식과 공개 API 일부 이행 계층을 추가했습니다. RealGrid 공식 기능을 참고해 자체 구현하며 원본 코드·리소스를 포함하지 않습니다. RealGrid 전체 기능·API와의 호환성을 보장하지 않습니다. npm에는 아직 등록하지 않았습니다.
+현재 **0.4.0**으로 Excel 다운로드 범위 선택과 가상 스크롤·무한 스크롤·페이징 전환을 제공합니다. A1 수식·그룹/트리·공개 API 일부 이행 계층도 포함합니다. RealGrid 공식 기능을 참고해 자체 구현하며 원본 코드·리소스를 포함하지 않습니다. RealGrid 전체 기능·API와의 호환성을 보장하지 않습니다. npm에는 아직 등록하지 않았습니다.
+
+## 0.4.0에 추가한 기능
+
+- **엑셀 다운로드**: 현재 페이지/불러온 행·검색정렬 결과·전체 데이터·선택 영역을 XLSX로 저장
+- **표시 방식 선택**: 가상 스크롤 / 무한 스크롤 / 페이징을 툴바와 API로 전환
+- **무한 스크롤**: 로컬 데이터를 하단에서 추가 표시, 더보기 버튼·종료 상태
+- **페이징**: 행 수·처음/이전/다음/마지막·페이지 번호 이동, 검색/정렬 후 초기화
+- 데이터·수식·Undo/Redo를 유지하며 전환. [사용 API와 범위](docs/data-modes.md)
 
 ## 0.3.0에 추가한 기능
 
@@ -90,10 +98,10 @@ npm run catalog -- --check
 
 `npm run build`는 소스에서 브라우저 JS·ESM·CommonJS·CSS를 생성합니다. `npm run catalog`는 JSON 원본에서 기능 문서를 갱신합니다. 배포물은 저장소에 포함하므로 사용자가 빌드할 필요는 없습니다.
 
-브라우저 개발 검증 도구는 런타임과 별개입니다. Playwright와 Chromium을 준비한 개발 환경에서 `node scripts/serve.mjs`를 실행하고 다른 터미널에서 `node scripts/browser-check.mjs`, `node scripts/browser-advanced-check.mjs`, `node scripts/browser-followup-check.mjs`를 실행합니다. 폐쇄망에서는 이미 준비된 개발 도구를 반입하거나 배포 파일만 사용하세요. 실제 Excel 생성 파일·복사 데이터와 내보낸 파일 검증 방법은 [검증 기록](docs/verification.md)에 있습니다.
+브라우저 개발 검증 도구는 런타임과 별개입니다. Playwright와 Chromium을 준비한 개발 환경에서 `node scripts/serve.mjs`를 실행하고 다른 터미널에서 `node scripts/browser-check.mjs`, `node scripts/browser-advanced-check.mjs`, `node scripts/browser-followup-check.mjs`, `node scripts/browser-paging-check.mjs`를 실행합니다. 폐쇄망에서는 이미 준비된 개발 도구를 반입하거나 배포 파일만 사용하세요. 실제 Excel 생성 파일·복사 데이터와 내보낸 파일 검증 방법은 [검증 기록](docs/verification.md)에 있습니다.
 
 ## 현재 한계
 
-변경은 메모리에 유지되며 서버·파일에 자동 저장하지 않습니다. 페이징·행 변경 상태·자동 같은 값 병합·피벗·전체 Excel 수식은 후속 구현 대상입니다. 그룹과 트리는 별도 모드이며 수동 병합은 가상 스크롤이 꺼진 일반 모드에서 사용합니다. 대용량 처리 성능과 전체 브라우저·한글 IME·스크린리더 호환성은 아직 인증하지 않았습니다.
+변경은 메모리에 유지되며 서버·파일에 자동 저장하지 않습니다. 서버 페이징·행 변경 상태·자동 같은 값 병합·피벗·전체 Excel 수식은 후속 구현 대상입니다. 그룹과 트리는 별도 모드이며 수동 병합은 가상 스크롤이 꺼진 일반 모드에서 사용합니다. 대용량 처리 성능과 전체 브라우저·한글 IME·스크린리더 호환성은 아직 인증하지 않았습니다.
 
 RealGrid는 기능 참고 대상의 제품명이며 이 프로젝트는 해당 제품과 제휴하지 않습니다. [MIT License](LICENSE)는 이 저장소의 자체 작성물에 적용됩니다.

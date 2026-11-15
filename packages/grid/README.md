@@ -123,3 +123,7 @@ XLSX 기본 내보내기는 현재 표시 행만 포함합니다. 접힌 그룹�
 ## 0.3 확장
 
 행·열 가상 스크롤과 A1 수식 설정·제약은 [확장 API](../../docs/grid-advanced.md), 선택적인 `MoaRealGrid` 배포물은 [공개 API 일부 이행](../../docs/realgrid-api-subset.md)에 정리했습니다. 수식은 기본 비활성화이며 전체 Excel 계산 엔진이나 전체 RealGrid 교체 호환을 제공하지 않습니다.
+
+## 0.4 표시 방식과 다운로드
+
+`dataMode: "virtual" | "infinite" | "pagination"`, `pageSize`와 `setDataMode`, `setPage`, `setPageSize`, `loadMore`, `getPagingState`를 제공합니다. 엑셀 다운로드 scope는 view/filtered/all/selection입니다. [사용 예제·범위·제약](../../docs/data-modes.md)을 확인하세요.

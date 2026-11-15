@@ -64,3 +64,7 @@ await grid.importXLSX(file, { formulas: false }); // 캐시된 값만 가져오�
 IME의 Process/229 키에서 편집기를 준비하고 조합 중 입력 요소를 보존합니다. 조합 중 Enter·Tab은 셀 이동이나 커밋으로 처리하지 않고, 조합 완료 후 입력값을 한 번 반영합니다. 외부 provider가 편집 중 값을 변경하면 입력 원문을 보존하고 오래된 커밋을 거부합니다. Esc로 취소한 후 최신 데이터를 다시 편집할 수 있습니다.
 
 Chromium CDP의 composition 입력 파이프라인으로 한글·Enter·Tab·Undo/Redo를 검사했습니다. 이 검사는 실제 Windows 한글 IME 후보창·자판 전환·브라우저별 이벤트 순서를 검증한 것은 아닙니다. 네이티브 IME·다른 엔진·스크린리더 수용시험은 남아 있습니다.
+
+## 0.4 표시 방식과 엑셀 다운로드
+
+로컬 페이징·무한 스크롤과 Excel 범위 선택은 [표시 방식 API](data-modes.md)에 정리했습니다. 이전 절의 전체 결과 기본 동작은 virtual 모드에 해당합니다.

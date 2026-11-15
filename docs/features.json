@@ -1002,12 +1002,12 @@
       "category": "QUERY",
       "name": "로컬 페이징",
       "phase": "M1",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/paging/paging1"
       ],
-      "acceptance": "선택·원본 행 매핑과 페이지 경계 이동"
+      "acceptance": "로컬 표시행 페이징·페이지 크기/번호 이동·원본 매핑·마지막 페이지 삭제 보정·선택/Undo 검증"
     },
     {
       "id": "QUERY-010",
@@ -1535,7 +1535,7 @@
       "sources": [
         "https://docs.realgrid.com/guides/excels/excel-export"
       ],
-      "acceptance": "실제 xlsx ZIP 생성과 로컬 저장; 열 너비·기본 값 타입·표시 병합 포함"
+      "acceptance": "로컬 XLSX 다운로드: 현재 페이지/불러온 행·검색정렬 결과·전체·선택 범위, 숫자/한글/빈 결과·오프라인 검증"
     },
     {
       "id": "EXPORT-002",
@@ -2070,6 +2070,16 @@
       "status": "implemented",
       "evidence": "proposal",
       "sources": []
+    },
+    {
+      "id": "EXT-017",
+      "category": "EXT",
+      "name": "무한 스크롤·표시 방식 선택",
+      "phase": "M1",
+      "status": "implemented",
+      "evidence": "proposal",
+      "sources": [],
+      "acceptance": "로컬 데이터 하단 도달/더보기·종료 상태·가상화 연계·가상/무한/페이징 전환; 서버 요청 제외"
     }
   ]
 }

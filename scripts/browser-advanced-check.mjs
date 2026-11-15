@@ -105,13 +105,13 @@ try {
   await cell(0, 1).click(); await clipboard('금지'); await page.keyboard.press('Control+v'); assert.deepEqual(await data(), baseline);
   assert.match(await page.locator('.moa-grid__status').innerText(), /병합/);
   await page.keyboard.press('Delete'); assert.equal((await data())[1].category, ''); await page.keyboard.press('Control+z'); assert.deepEqual(await data(), baseline);
-  const mergedDownloadPromise = page.waitForEvent('download'); await page.getByRole('button', { name: 'XLSX 내보내기', exact: true }).click();
+  const mergedDownloadPromise = page.waitForEvent('download'); await page.getByRole('button', { name: '엑셀 다운로드', exact: true }).click();
   await (await mergedDownloadPromise).saveAs(path.join(output, 'merged.xlsx'));
   await page.screenshot({ path: path.join(output, 'merged.png'), fullPage: true });
   await page.getByRole('button', { name: '병합 해제', exact: true }).click(); assert.equal(await cell(1, 2).count(), 1); assert.deepEqual(await data(), baseline);
   record('Cell merge/unmerge preserves hidden values, protects paste targets and expands Delete/undo to the full merged region');
 
-  const downloaded = page.waitForEvent('download'); await page.getByRole('button', { name: 'XLSX 내보내기', exact: true }).click();
+  const downloaded = page.waitForEvent('download'); await page.getByRole('button', { name: '엑셀 다운로드', exact: true }).click();
   const download = await downloaded, exportedPath = path.join(output, 'exported.xlsx'); await download.saveAs(exportedPath);
   const exported = await readFile(exportedPath); assert.equal(exported[0], 0x50); assert.equal(exported[1], 0x4b);
   await page.locator('input[type=file]').setInputFiles(exportedPath); await page.waitForFunction(() => grid.model.rows.length === 16 && grid.model.canUndo);
@@ -163,7 +163,7 @@ try {
   const localRequests = [], localErrors = [];
   local.on('request', request => { if (/^https?:/.test(request.url())) localRequests.push(request.url()); }); local.on('pageerror', error => localErrors.push(error.message));
   await local.goto(pathToFileURL(path.join(root, 'examples/grid/index.html')).href);
-  const localDownload = local.waitForEvent('download'); await local.getByRole('button', { name: 'XLSX 내보내기', exact: true }).click(); await localDownload;
+  const localDownload = local.waitForEvent('download'); await local.getByRole('button', { name: '엑셀 다운로드', exact: true }).click(); await localDownload;
   await local.selectOption('#example-mode', 'group'); assert((await local.locator('.moa-grid__subtotal').count()) > 0);
   await local.selectOption('#example-mode', 'tree'); assert.equal(await local.locator('td[data-col="0"][data-row]').count(), 6);
   assert.deepEqual(localRequests, []); assert.deepEqual(localErrors, []); await offline.close(); record('XLSX export, grouping and tree modes work from file:// offline with zero HTTP requests');
