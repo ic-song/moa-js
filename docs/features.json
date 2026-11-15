@@ -174,24 +174,24 @@
       "category": "BASE",
       "name": "행 추가·삽입",
       "phase": "M1",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/crud/insert"
       ],
-      "acceptance": "기본값·검증·선택 이동을 포함해 행 추가"
+      "acceptance": "행 기본값과 추가·삽입을 지원하고 한 번의 Undo/Redo로 복원"
     },
     {
       "id": "BASE-011",
       "category": "BASE",
       "name": "행 삭제",
       "phase": "M1",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/crud/delete"
       ],
-      "acceptance": "셀 값 지우기와 구분하고 행 삭제를 이력에 기록"
+      "acceptance": "표시 좌표를 원본 행으로 매핑하여 삭제; 트리 부모는 자손까지 한 번에 처리"
     },
     {
       "id": "BASE-012",
@@ -726,12 +726,12 @@
       "category": "COLUMN",
       "name": "컬럼 너비 변경",
       "phase": "M1",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/column/column-resizing"
       ],
-      "acceptance": "마우스 크기 조절 및 최소·최대 너비"
+      "acceptance": "마우스 및 키보드로 64~1000px 열 너비 조절"
     },
     {
       "id": "COLUMN-003",
@@ -762,12 +762,12 @@
       "category": "COLUMN",
       "name": "열 고정",
       "phase": "M1",
-      "status": "planned",
+      "status": "partial",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/grid-components/fixed-columns"
       ],
-      "acceptance": "가로 스크롤 중 고정 열과 선택 경계 일치"
+      "acceptance": "왼쪽 열 고정 구현; 오른쪽 열·고정 영역별 권한 설정은 후속"
     },
     {
       "id": "COLUMN-006",
@@ -918,12 +918,12 @@
       "category": "QUERY",
       "name": "다중 컬럼 정렬",
       "phase": "M1",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/column/column-sorting"
       ],
-      "acceptance": "정렬 우선순위와 방향 표시"
+      "acceptance": "Shift+헤더 클릭 및 API로 정렬 우선순위·방향 표시"
     },
     {
       "id": "QUERY-003",
@@ -942,12 +942,12 @@
       "category": "QUERY",
       "name": "조건 필터",
       "phase": "M1",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "body-reviewed",
       "sources": [
         "https://docs.realgrid.com/guides/column/column-filtering"
       ],
-      "acceptance": "비교·포함·범위 및 AND·OR 조건 지원"
+      "acceptance": "포함·일치·수치 비교·범위·빈 값 및 전체 조건 AND/OR 연결; RealGrid 컬럼별 논리와 차이"
     },
     {
       "id": "QUERY-005",
@@ -1098,36 +1098,36 @@
       "category": "SUMMARY",
       "name": "다단 행 그룹",
       "phase": "M2",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "body-reviewed",
       "sources": [
         "https://docs.realgrid.com/guides/row-group/row-grouping"
       ],
-      "acceptance": "필드 조합별 계층 그룹 생성·접기·펼치기"
+      "acceptance": "복수 필드 계층 그룹과 접기·펼치기"
     },
     {
       "id": "SUMMARY-008",
       "category": "SUMMARY",
       "name": "그룹 API·이벤트",
       "phase": "M2",
-      "status": "planned",
+      "status": "partial",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/row-group/grouping-api"
       ],
-      "acceptance": "그룹 생성 취소와 펼침 상태 제어"
+      "acceptance": "그룹 설정 API와 UI 접기·펼치기 구현; 취소·전후 이벤트 계약은 후속"
     },
     {
       "id": "SUMMARY-009",
       "category": "SUMMARY",
       "name": "그룹별 소계·다중 푸터",
       "phase": "M2",
-      "status": "planned",
+      "status": "partial",
       "evidence": "body-reviewed",
       "sources": [
         "https://docs.realgrid.com/guides/row-group/row-grouping"
       ],
-      "acceptance": "그룹별 합계와 여러 줄 소계"
+      "acceptance": "그룹별 숫자 합계 구현; 다중 푸터와 사용자 집계는 후속"
     },
     {
       "id": "SUMMARY-010",
@@ -1386,24 +1386,24 @@
       "category": "TREE",
       "name": "트리 데이터 모델·뷰",
       "phase": "M2",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "body-reviewed",
       "sources": [
         "https://docs.realgrid.com/guides/tree/tree-view"
       ],
-      "acceptance": "부모·자식·깊이와 계층 표시"
+      "acceptance": "ID·부모 ID 기반 트리와 셀 편집"
     },
     {
       "id": "TREE-002",
       "category": "TREE",
       "name": "배열·객체 트리 입력",
       "phase": "M2",
-      "status": "planned",
+      "status": "partial",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/tree/tree-array-data"
       ],
-      "acceptance": "부모 키·중첩 객체 입력의 공통 모델 변환"
+      "acceptance": "부모 키가 있는 평면 배열 입력 구현; 중첩 Object 입력은 후속"
     },
     {
       "id": "TREE-003",
@@ -1422,12 +1422,12 @@
       "category": "TREE",
       "name": "노드 추가·삭제·펼침",
       "phase": "M2",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/tree/tree-node-control"
       ],
-      "acceptance": "하위 노드 영향과 Undo 범위 정의"
+      "acceptance": "노드 추가·자손 포함 삭제·접기·펼치기 및 데이터 Undo"
     },
     {
       "id": "TREE-005",
@@ -1446,12 +1446,12 @@
       "category": "TREE",
       "name": "트리 이벤트·노드 조회",
       "phase": "M2",
-      "status": "planned",
+      "status": "partial",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/tree/tree-event"
       ],
-      "acceptance": "취소 가능 이벤트와 부모·자식 조회"
+      "acceptance": "ID·부모·자식 모델과 공통 변경 콜백 제공; 전용 취소 이벤트는 후속"
     },
     {
       "id": "TREE-007",
@@ -1494,12 +1494,12 @@
       "category": "TREE",
       "name": "Expander 컬럼",
       "phase": "M3",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "index-listed",
       "sources": [
         "https://docs.realgrid.com/guides/tree/tree-expander-column"
       ],
-      "acceptance": "트리 펼침 UI 위치 제어"
+      "acceptance": "labelField로 트리 expander를 표시할 컬럼 지정"
     },
     {
       "id": "TREE-011",
@@ -1518,36 +1518,36 @@
       "category": "TREE",
       "name": "계층 정렬·필터",
       "phase": "M3",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "body-reviewed",
       "sources": [
         "https://docs.realgrid.com/guides/tree/tree-view"
       ],
-      "acceptance": "자식 정렬 시 부모 유지; 부모 필터 제외의 영향 정의"
+      "acceptance": "형제 정렬·계층 유지; 검색·필터 시 상위 경로 보존은 RealGrid 기본 동작과 차이"
     },
     {
       "id": "EXPORT-001",
       "category": "EXPORT",
       "name": "XLSX 내보내기",
       "phase": "M1",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "body-reviewed",
       "sources": [
         "https://docs.realgrid.com/guides/excels/excel-export"
       ],
-      "acceptance": "진짜 xlsx 생성; CSV에 확장자만 바꾸지 않음"
+      "acceptance": "실제 xlsx ZIP 생성과 로컬 저장; 열 너비·기본 값 타입·표시 병합 포함"
     },
     {
       "id": "EXPORT-002",
       "category": "EXPORT",
       "name": "XLSX 가져오기",
       "phase": "M1",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "body-reviewed",
       "sources": [
         "https://docs.realgrid.com/guides/tip/excel-import"
       ],
-      "acceptance": "선택 모듈로 로컬 파일 파싱; 열 매핑·타입·검증 적용"
+      "acceptance": "로컬 파일 첫 시트 또는 지정 시트, 헤더 매핑·타입·검증·전체 Undo/Redo"
     },
     {
       "id": "EXPORT-003",
@@ -1932,20 +1932,20 @@
       "category": "EXT",
       "name": "오프라인 배포 검증",
       "phase": "M1",
-      "status": "planned",
+      "status": "implemented",
       "evidence": "proposal",
       "sources": [],
-      "acceptance": "배포 파일 목록·체크섬·선택 의존성 고지·망 차단 재검증"
+      "acceptance": "배포 파일 SHA256SUMS·선택 의존성 라이선스·로컬 동봉·망 차단 검증"
     },
     {
       "id": "EXT-011",
       "category": "EXT",
       "name": "성능·호환 회귀 스위트",
       "phase": "M1",
-      "status": "planned",
+      "status": "partial",
       "evidence": "proposal",
       "sources": [],
-      "acceptance": "여러 브라우저 및 정렬×필터×편집×Undo 조합 검증"
+      "acceptance": "모델·Chromium·실제 Excel 생성 파일과 복사 데이터 검증; 다른 엔진·IME·스크린리더는 후속"
     },
     {
       "id": "EXT-012",
@@ -2038,6 +2038,36 @@
         "https://docs.realgrid.com/guides/tip/drag-and-drop"
       ],
       "acceptance": "호스트의 파일 처리와 그리드 데이터 변경 분리"
+    },
+    {
+      "id": "EXT-014",
+      "name": "붙여넣기 자동 행 확장",
+      "phase": "M0",
+      "acceptance": "일반 무필터 모드에서 빈 표·마지막 행 이후 붙여넣기를 한 번에 적용·Undo/Redo",
+      "category": "EXT",
+      "status": "implemented",
+      "evidence": "proposal",
+      "sources": []
+    },
+    {
+      "id": "EXT-015",
+      "name": "행·파일 단위 변경 이력",
+      "phase": "M1",
+      "acceptance": "행 추가·삭제·XLSX 데이터 교체를 단일 트랜잭션으로 되돌리기·다시 실행",
+      "category": "EXT",
+      "status": "implemented",
+      "evidence": "proposal",
+      "sources": []
+    },
+    {
+      "id": "EXT-016",
+      "name": "수동 사각형 셀 병합",
+      "phase": "M2",
+      "acceptance": "일반 모드에서 가로·세로 병합·해제; 숨겨진 데이터 보존과 붙여넣기 차단",
+      "category": "EXT",
+      "status": "implemented",
+      "evidence": "proposal",
+      "sources": []
     }
   ]
 }

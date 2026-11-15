@@ -26,8 +26,25 @@ const grid = new MoaGrid('#grid', {
     { field: 'quantity', header: '수량', type: 'number', width: 110, validate: value => value < 0 ? '수량은 0 이상이어야 합니다.' : null },
     { field: 'price', header: '단가', type: 'number', width: 130, validate: value => value < 0 ? '단가는 0 이상이어야 합니다.' : null },
     { field: 'team', header: '담당부서', width: 120 },
-    { field: 'note', header: '비고', width: 220 }
+    { field: 'note', header: '비고', width: 220 },
+    { field: 'parentCode', header: '상위코드', width: 140, editable: false }
   ],
   data: sampleRows
 });
-document.getElementById('reset').addEventListener('click', () => { grid.setSearch(''); grid.setData(sampleRows); });
+const treeRows = [
+  { code: 'HQ', name: '운영본부', category: '조직', quantity: 0, price: 0, team: '운영팀', note: '상위 노드', parentCode: '' },
+  { code: 'IT', name: '전산 자산', category: '전산용품', quantity: 0, price: 0, team: '개발팀', note: '', parentCode: 'HQ' },
+  { code: 'IT-001', name: '무선 키보드', category: '전산용품', quantity: 12, price: 49000, team: '개발팀', note: '', parentCode: 'IT' },
+  { code: 'IT-002', name: '27인치 모니터', category: '전산용품', quantity: 8, price: 289000, team: '개발팀', note: '', parentCode: 'IT' },
+  { code: 'OF', name: '사무 자산', category: '사무용품', quantity: 0, price: 0, team: '총무팀', note: '', parentCode: 'HQ' },
+  { code: 'OF-001', name: 'A4 복사용지', category: '사무용품', quantity: 40, price: 6200, team: '총무팀', note: '', parentCode: 'OF' }
+];
+const mode = document.getElementById('example-mode');
+function loadExample() {
+  grid.setGroupBy([]); grid.setTree(null); grid.setFilters([], { logic: 'and' }); grid.setSorts([]); grid.setSearch('');
+  grid.setData(mode.value === 'tree' ? treeRows : sampleRows);
+  if (mode.value === 'tree') grid.setTree({ idField: 'code', parentField: 'parentCode', labelField: 'name' });
+  else if (mode.value === 'group') grid.setGroupBy(['category', 'team']);
+}
+mode.addEventListener('change', loadExample);
+document.getElementById('reset').addEventListener('click', loadExample);

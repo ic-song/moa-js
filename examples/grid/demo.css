@@ -11,6 +11,8 @@ h1 { font-size: clamp(26px, 3vw, 38px); line-height: 1.3; letter-spacing: -.045e
 .sheet-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 h2 { font-size: 17px; line-height: 1.5; margin: 0; }
 .sheet-heading button { min-height: 44px; padding: 8px 14px; font: inherit; color: var(--page-ink); border: 1px solid var(--page-line); background: transparent; border-radius: 4px; cursor: pointer; }
+.sheet-heading select { min-height: 44px; max-width: 100%; padding: 8px; color: var(--page-ink); border: 1px solid var(--page-line); border-radius: 4px; font: inherit; background: transparent; }
+.mode-help { color: var(--page-muted); font-size: 13px; margin: 0 0 16px; }
 button:focus-visible { outline: 2px solid var(--page-action); outline-offset: 2px; }
 .help { margin-top: 32px; }
 dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 32px; margin: 20px 0; }

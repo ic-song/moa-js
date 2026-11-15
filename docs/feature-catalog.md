@@ -1,6 +1,6 @@
 # RealGrid 참고 기능 카탈로그
 
-확인일: 2026-11-15 · 참고 릴리스: RealGrid2 2.10.2 (2026-10-22) · 총 167개 후보
+확인일: 2026-11-15 · 참고 릴리스: RealGrid2 2.10.2 (2026-10-22) · 총 170개 후보
 
 공식 가이드 기반 1차 기능 후보 목록. 모든 API·옵션·버전 차이의 완전한 조사 또는 호환성 인증이 아님.
 
@@ -12,17 +12,17 @@
 
 | 단계 | 의미 | 항목 수 |
 | --- | --- | ---: |
-| M0 | 핵심 셀 조작 | 33 |
-| M1 | 업무 적용 | 44 |
-| M2 | 고급 그리드 | 50 |
+| M0 | 핵심 셀 조작 | 34 |
+| M1 | 업무 적용 | 45 |
+| M2 | 고급 그리드 | 51 |
 | M3 | 특수 기능 | 34 |
 | LATER | 독립 확장 후보 | 6 |
 
 | 상태 | 항목 수 |
 | --- | ---: |
-| 초기 구현 | 29 |
-| 일부 구현 | 7 |
-| 계획 | 131 |
+| 초기 구현 | 45 |
+| 일부 구현 | 13 |
+| 계획 | 112 |
 
 중요한 구분과 구현 순서는 [로드맵](roadmap.md), 사용자 지정 단축키는 [셀 조작 계약](grid-interaction-contract.md)을 참고한다.
 
@@ -39,8 +39,8 @@
 | BASE-007 | 서브타입 | M3 | 계획 | 하위 타입별 변환·검증 계약 작성 | [목차 확인](https://docs.realgrid.com/guides/data-manager/subtypes) |
 | BASE-008 | XML 입력 | M3 | 계획 | XML 필드 매핑 및 파싱 오류 표시 | [목차 확인](https://docs.realgrid.com/guides/fill-data/load-xml-data) |
 | BASE-009 | 행·셀 값 조회 및 변경 | M0 | 일부 구현 | 전체 조회와 모델 변경 구현; 공개 셀 단위 API 정리 필요 | [목차 확인](https://docs.realgrid.com/guides/crud/get-values) |
-| BASE-010 | 행 추가·삽입 | M1 | 계획 | 기본값·검증·선택 이동을 포함해 행 추가 | [목차 확인](https://docs.realgrid.com/guides/crud/insert) |
-| BASE-011 | 행 삭제 | M1 | 계획 | 셀 값 지우기와 구분하고 행 삭제를 이력에 기록 | [목차 확인](https://docs.realgrid.com/guides/crud/delete) |
+| BASE-010 | 행 추가·삽입 | M1 | 초기 구현 | 행 기본값과 추가·삽입을 지원하고 한 번의 Undo/Redo로 복원 | [목차 확인](https://docs.realgrid.com/guides/crud/insert) |
+| BASE-011 | 행 삭제 | M1 | 초기 구현 | 표시 좌표를 원본 행으로 매핑하여 삭제; 트리 부모는 자손까지 한 번에 처리 | [목차 확인](https://docs.realgrid.com/guides/crud/delete) |
 | BASE-012 | 행 단위 수정 | M1 | 계획 | 한 행의 여러 필드를 하나의 트랜잭션으로 변경 | [목차 확인](https://docs.realgrid.com/guides/crud/update) |
 | BASE-013 | 행 변경 상태 | M1 | 계획 | 추가·수정·삭제 상태와 서버 저장 후 기준점 재설정 | [본문 검토](https://docs.realgrid.com/guides/editing/row-states) |
 | BASE-014 | 원본 롤백 | M1 | 계획 | Undo와 별도로 마지막 저장 기준점으로 복원 | [목차 확인](https://docs.realgrid.com/guides/data-manager/data-rollback) |
@@ -100,10 +100,10 @@
 | ID | 기능 | 단계 | 상태 | 완료 판정 | 근거 |
 | --- | --- | --- | --- | --- | --- |
 | COLUMN-001 | 컬럼 표시·편집 속성 변경 | M1 | 계획 | 실행 중 숨김·읽기 전용 변경 후 선택 유효성 보장 | [목차 확인](https://docs.realgrid.com/guides/column/column-properties) |
-| COLUMN-002 | 컬럼 너비 변경 | M1 | 계획 | 마우스 크기 조절 및 최소·최대 너비 | [목차 확인](https://docs.realgrid.com/guides/column/column-resizing) |
+| COLUMN-002 | 컬럼 너비 변경 | M1 | 초기 구현 | 마우스 및 키보드로 64~1000px 열 너비 조절 | [목차 확인](https://docs.realgrid.com/guides/column/column-resizing) |
 | COLUMN-003 | 컬럼 너비 자동 맞춤 | M1 | 계획 | 헤더·표본 데이터 기반 너비 산정 | [목차 확인](https://docs.realgrid.com/guides/column/grid-fitting) |
 | COLUMN-004 | 컬럼 순서 변경 | M1 | 계획 | 화면 순서 변경 후 원본 필드와 클립보드 대응 유지 | [목차 확인](https://docs.realgrid.com/guides/column/column-moving) |
-| COLUMN-005 | 열 고정 | M1 | 계획 | 가로 스크롤 중 고정 열과 선택 경계 일치 | [목차 확인](https://docs.realgrid.com/guides/grid-components/fixed-columns) |
+| COLUMN-005 | 열 고정 | M1 | 일부 구현 | 왼쪽 열 고정 구현; 오른쪽 열·고정 영역별 권한 설정은 후속 | [목차 확인](https://docs.realgrid.com/guides/grid-components/fixed-columns) |
 | COLUMN-006 | 행 고정 | M2 | 계획 | 세로 스크롤·편집·집계와 고정 행 정합성 | [목차 확인](https://docs.realgrid.com/guides/grid-components/fixed-rows) |
 | COLUMN-007 | 그룹 헤더 | M1 | 계획 | 다단 헤더의 열 범위와 읽기 순서 보장 | [본문 검토](https://docs.realgrid.com/guides/column/layout) |
 | COLUMN-008 | 한 레코드 다중행 레이아웃 | M3 | 계획 | 세로 레이아웃에서 이동·복사 좌표 계약 정의 | [본문 검토](https://docs.realgrid.com/guides/column/layout) |
@@ -121,9 +121,9 @@
 | ID | 기능 | 단계 | 상태 | 완료 판정 | 근거 |
 | --- | --- | --- | --- | --- | --- |
 | QUERY-001 | 단일 컬럼 정렬 | M0 | 초기 구현 | 숫자·문자 정렬과 빈 값 처리; 원본 인덱스 보존 | [목차 확인](https://docs.realgrid.com/guides/column/column-sorting) |
-| QUERY-002 | 다중 컬럼 정렬 | M1 | 계획 | 정렬 우선순위와 방향 표시 | [목차 확인](https://docs.realgrid.com/guides/column/column-sorting) |
+| QUERY-002 | 다중 컬럼 정렬 | M1 | 초기 구현 | Shift+헤더 클릭 및 API로 정렬 우선순위·방향 표시 | [목차 확인](https://docs.realgrid.com/guides/column/column-sorting) |
 | QUERY-003 | 고유값 자동 필터 | M1 | 계획 | 필드의 고유값을 목록으로 선택 | [목차 확인](https://docs.realgrid.com/guides/column/column-auto-filtering) |
-| QUERY-004 | 조건 필터 | M1 | 계획 | 비교·포함·범위 및 AND·OR 조건 지원 | [본문 검토](https://docs.realgrid.com/guides/column/column-filtering) |
+| QUERY-004 | 조건 필터 | M1 | 초기 구현 | 포함·일치·수치 비교·범위·빈 값 및 전체 조건 AND/OR 연결; RealGrid 컬럼별 논리와 차이 | [본문 검토](https://docs.realgrid.com/guides/column/column-filtering) |
 | QUERY-005 | 필터 패널 | M2 | 계획 | 조건 추가·해제·초기화 화면 | [목차 확인](https://docs.realgrid.com/guides/column/column-filter-panel) |
 | QUERY-006 | 필터 목록 순서 | M2 | 계획 | 표시 순서와 빈 값 위치 제어 | [목차 확인](https://docs.realgrid.com/guides/column/filter-selector-data-order) |
 | QUERY-007 | 전체 문자열 검색 | M0 | 초기 구현 | 현재 구현은 전체 열 포함 검색; RealGrid 검색 API와는 별도 | [목차 확인](https://docs.realgrid.com/guides/data-manager/search-item) |
@@ -141,9 +141,9 @@
 | SUMMARY-004 | 푸터 병합 | M2 | 계획 | 병합 경계와 집계 위치 일치 | [목차 확인](https://docs.realgrid.com/guides/header-and-footer/footer-user-spans) |
 | SUMMARY-005 | 상단 요약 | M2 | 계획 | 필터·편집 후 재계산 | [목차 확인](https://docs.realgrid.com/guides/header-and-footer/header-summary) |
 | SUMMARY-006 | 헤더·푸터 템플릿 | M3 | 계획 | 직접 DOM 렌더 콜백과 키보드·수명 계약 | [목차 확인](https://docs.realgrid.com/guides/header-and-footer/header-template) |
-| SUMMARY-007 | 다단 행 그룹 | M2 | 계획 | 필드 조합별 계층 그룹 생성·접기·펼치기 | [본문 검토](https://docs.realgrid.com/guides/row-group/row-grouping) |
-| SUMMARY-008 | 그룹 API·이벤트 | M2 | 계획 | 그룹 생성 취소와 펼침 상태 제어 | [목차 확인](https://docs.realgrid.com/guides/row-group/grouping-api) |
-| SUMMARY-009 | 그룹별 소계·다중 푸터 | M2 | 계획 | 그룹별 합계와 여러 줄 소계 | [본문 검토](https://docs.realgrid.com/guides/row-group/row-grouping) |
+| SUMMARY-007 | 다단 행 그룹 | M2 | 초기 구현 | 복수 필드 계층 그룹과 접기·펼치기 | [본문 검토](https://docs.realgrid.com/guides/row-group/row-grouping) |
+| SUMMARY-008 | 그룹 API·이벤트 | M2 | 일부 구현 | 그룹 설정 API와 UI 접기·펼치기 구현; 취소·전후 이벤트 계약은 후속 | [목차 확인](https://docs.realgrid.com/guides/row-group/grouping-api) |
+| SUMMARY-009 | 그룹별 소계·다중 푸터 | M2 | 일부 구현 | 그룹별 숫자 합계 구현; 다중 푸터와 사용자 집계는 후속 | [본문 검토](https://docs.realgrid.com/guides/row-group/row-grouping) |
 | SUMMARY-010 | 행 병합 그룹 | M3 | 계획 | 계층 그룹과 다른 병합 표시 모드 | [목차 확인](https://docs.realgrid.com/guides/row-group/merged-row-grouping) |
 | SUMMARY-011 | 행 높이 조절·자동 높이 | M2 | 계획 | 줄바꿈과 사용자 크기 변경 후 스크롤 오차 없음 | [목차 확인](https://docs.realgrid.com/guides/row-group/row-height) |
 | SUMMARY-012 | 데이터에 맞는 그리드 높이 | M2 | 계획 | 최대 높이와 내부 스크롤 경계 제어 | [목차 확인](https://docs.realgrid.com/guides/row-group/sync-grid-height) |
@@ -175,25 +175,25 @@
 
 | ID | 기능 | 단계 | 상태 | 완료 판정 | 근거 |
 | --- | --- | --- | --- | --- | --- |
-| TREE-001 | 트리 데이터 모델·뷰 | M2 | 계획 | 부모·자식·깊이와 계층 표시 | [본문 검토](https://docs.realgrid.com/guides/tree/tree-view) |
-| TREE-002 | 배열·객체 트리 입력 | M2 | 계획 | 부모 키·중첩 객체 입력의 공통 모델 변환 | [목차 확인](https://docs.realgrid.com/guides/tree/tree-array-data) |
+| TREE-001 | 트리 데이터 모델·뷰 | M2 | 초기 구현 | ID·부모 ID 기반 트리와 셀 편집 | [본문 검토](https://docs.realgrid.com/guides/tree/tree-view) |
+| TREE-002 | 배열·객체 트리 입력 | M2 | 일부 구현 | 부모 키가 있는 평면 배열 입력 구현; 중첩 Object 입력은 후속 | [목차 확인](https://docs.realgrid.com/guides/tree/tree-array-data) |
 | TREE-003 | XML 트리 입력 | M3 | 계획 | XML 노드 매핑과 중복 키 검사 | [목차 확인](https://docs.realgrid.com/guides/tree/tree-xml-data) |
-| TREE-004 | 노드 추가·삭제·펼침 | M2 | 계획 | 하위 노드 영향과 Undo 범위 정의 | [목차 확인](https://docs.realgrid.com/guides/tree/tree-node-control) |
+| TREE-004 | 노드 추가·삭제·펼침 | M2 | 초기 구현 | 노드 추가·자손 포함 삭제·접기·펼치기 및 데이터 Undo | [목차 확인](https://docs.realgrid.com/guides/tree/tree-node-control) |
 | TREE-005 | 트리 아이콘·템플릿 | M3 | 계획 | 접힘·펼침·리프의 로컬 시각 표시 | [목차 확인](https://docs.realgrid.com/guides/tree/tree-template) |
-| TREE-006 | 트리 이벤트·노드 조회 | M2 | 계획 | 취소 가능 이벤트와 부모·자식 조회 | [목차 확인](https://docs.realgrid.com/guides/tree/tree-event) |
+| TREE-006 | 트리 이벤트·노드 조회 | M2 | 일부 구현 | ID·부모·자식 모델과 공통 변경 콜백 제공; 전용 취소 이벤트는 후속 | [목차 확인](https://docs.realgrid.com/guides/tree/tree-event) |
 | TREE-007 | 트리 지연 로드 | M3 | 계획 | 펼칠 때 호스트가 자식 데이터 공급 | [목차 확인](https://docs.realgrid.com/guides/tree/tree-lazy-loading) |
 | TREE-008 | 노드 이동 | M3 | 계획 | 자기 하위 이동 방지와 부모 변경 | [목차 확인](https://docs.realgrid.com/guides/tree/tree-node-move) |
 | TREE-009 | 하위 노드 집계 | M3 | 계획 | 자손 합계의 편집 후 갱신 | [목차 확인](https://docs.realgrid.com/guides/tree/tree-subnode-calculation) |
-| TREE-010 | Expander 컬럼 | M3 | 계획 | 트리 펼침 UI 위치 제어 | [목차 확인](https://docs.realgrid.com/guides/tree/tree-expander-column) |
+| TREE-010 | Expander 컬럼 | M3 | 초기 구현 | labelField로 트리 expander를 표시할 컬럼 지정 | [목차 확인](https://docs.realgrid.com/guides/tree/tree-expander-column) |
 | TREE-011 | 부모·자식 체크 연동 | M3 | 계획 | 부분 체크와 비활성 노드 정책 | [목차 확인](https://docs.realgrid.com/guides/tip/tree-check-bar) |
-| TREE-012 | 계층 정렬·필터 | M3 | 계획 | 자식 정렬 시 부모 유지; 부모 필터 제외의 영향 정의 | [본문 검토](https://docs.realgrid.com/guides/tree/tree-view) |
+| TREE-012 | 계층 정렬·필터 | M3 | 초기 구현 | 형제 정렬·계층 유지; 검색·필터 시 상위 경로 보존은 RealGrid 기본 동작과 차이 | [본문 검토](https://docs.realgrid.com/guides/tree/tree-view) |
 
 ## 엑셀·파일 교환
 
 | ID | 기능 | 단계 | 상태 | 완료 판정 | 근거 |
 | --- | --- | --- | --- | --- | --- |
-| EXPORT-001 | XLSX 내보내기 | M1 | 계획 | 진짜 xlsx 생성; CSV에 확장자만 바꾸지 않음 | [본문 검토](https://docs.realgrid.com/guides/excels/excel-export) |
-| EXPORT-002 | XLSX 가져오기 | M1 | 계획 | 선택 모듈로 로컬 파일 파싱; 열 매핑·타입·검증 적용 | [본문 검토](https://docs.realgrid.com/guides/tip/excel-import) |
+| EXPORT-001 | XLSX 내보내기 | M1 | 초기 구현 | 실제 xlsx ZIP 생성과 로컬 저장; 열 너비·기본 값 타입·표시 병합 포함 | [본문 검토](https://docs.realgrid.com/guides/excels/excel-export) |
+| EXPORT-002 | XLSX 가져오기 | M1 | 초기 구현 | 로컬 파일 첫 시트 또는 지정 시트, 헤더 매핑·타입·검증·전체 Undo/Redo | [본문 검토](https://docs.realgrid.com/guides/tip/excel-import) |
 | EXPORT-003 | 그룹·소계 내보내기 | M2 | 계획 | 그룹 구조와 집계값 보존 | [목차 확인](https://docs.realgrid.com/guides/excels/row-group-export) |
 | EXPORT-004 | 복합 레이아웃 내보내기 | M3 | 계획 | 다단 헤더·병합 범위 보존 | [목차 확인](https://docs.realgrid.com/guides/excels/layout-export) |
 | EXPORT-005 | 여러 그리드·시트 내보내기 | M2 | 계획 | 시트명 검증과 데이터 구간 구분 | [목차 확인](https://docs.realgrid.com/guides/excels/multi-export) |
@@ -237,10 +237,13 @@
 | EXT-007 | 선택 영역 채우기 핸들 | M3 | 계획 | 동일 값 복제와 연속값 채우기를 구분 | 자체 요구 |
 | EXT-008 | 엑셀식 수식 엔진 | M3 | 계획 | 별도 선택 모듈로 참조·의존·순환 계산 지원; 현재 그리드 범위 밖 | 자체 요구 |
 | EXT-009 | TypeScript 타입 선언 | M1 | 계획 | 공개 옵션·이벤트·좌표·변경 레코드의 타입 계약 | 자체 요구 |
-| EXT-010 | 오프라인 배포 검증 | M1 | 계획 | 배포 파일 목록·체크섬·선택 의존성 고지·망 차단 재검증 | 자체 요구 |
-| EXT-011 | 성능·호환 회귀 스위트 | M1 | 계획 | 여러 브라우저 및 정렬×필터×편집×Undo 조합 검증 | 자체 요구 |
+| EXT-010 | 오프라인 배포 검증 | M1 | 초기 구현 | 배포 파일 SHA256SUMS·선택 의존성 라이선스·로컬 동봉·망 차단 검증 | 자체 요구 |
+| EXT-011 | 성능·호환 회귀 스위트 | M1 | 일부 구현 | 모델·Chromium·실제 Excel 생성 파일과 복사 데이터 검증; 다른 엔진·IME·스크린리더는 후속 | 자체 요구 |
 | EXT-012 | 패키지별 배포·독립 사용 | M0 | 일부 구현 | 현재 grid JS·CSS 독립 제공; npm 등록과 향후 모듈은 미실행 | 자체 요구 |
 | EXT-013 | 폼·트리·다이얼로그 독립 모듈 | M3 | 계획 | 그리드 공통 코드의 실제 재사용 근거가 생길 때 패키지 분리 | 자체 요구 |
+| EXT-014 | 붙여넣기 자동 행 확장 | M0 | 초기 구현 | 일반 무필터 모드에서 빈 표·마지막 행 이후 붙여넣기를 한 번에 적용·Undo/Redo | 자체 요구 |
+| EXT-015 | 행·파일 단위 변경 이력 | M1 | 초기 구현 | 행 추가·삭제·XLSX 데이터 교체를 단일 트랜잭션으로 되돌리기·다시 실행 | 자체 요구 |
+| EXT-016 | 수동 사각형 셀 병합 | M2 | 초기 구현 | 일반 모드에서 가로·세로 병합·해제; 숨겨진 데이터 보존과 붙여넣기 차단 | 자체 요구 |
 
 ## 별도 제품·연동 후보
 

@@ -11,4 +11,4 @@ jobs:
         with:
           node-version: 22
       - run: npm run check
-      - run: git diff --exit-code -- packages/grid/dist packages/grid/LICENSE docs/feature-catalog.md
+      - run: git diff --exit-code -- packages/grid/dist packages/grid/LICENSE packages/grid/SHA256SUMS.txt docs/feature-catalog.md

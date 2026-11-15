@@ -2,6 +2,10 @@
 
 컨셉: **폐쇄망에서도 설치 없이 가져다 쓰는 업무용 JavaScript 도구함.** 이름은 가칭이며 첫 모듈은 엑셀식 조작을 제공하는 Grid입니다. 필요한 모듈만 배포하고 일반 HTML·JSP에서 사용할 수 있는 코어를 우선합니다.
 
+## 0.2.0 반영 상태
+
+Excel HTML/TSV 붙여넣기·자동 행 확장, 행 추가/삭제·파일 교체 Undo/Redo, 조건 필터 AND/OR, 다중 정렬, 왼쪽 열 고정·너비 조절, 다단 그룹·숫자 소계, ID/부모 ID 트리, 수동 사각형 병합, XLSX 입출력을 기본 구현했습니다. 아래 M0~M3는 당초의 전체 후보 분류이며 단계에 속한 모든 기능이 완료되었다는 뜻은 아닙니다. 최신 상태는 카탈로그의 기능 ID별 상태와 [비교표](realgrid-comparison.md)를 기준으로 합니다.
+
 ## 기능 참고 기준
 
 2026-11-15에 [RealGrid2 공식 가이드](https://docs.realgrid.com/)와 [버전 기록](https://docs.realgrid.com/changelog/releases)을 확인했습니다. 참고 릴리스는 2.10.2(2026-10-22)이며 사용자의 실제 적용 버전은 미확인입니다. 예전 RealGridJS 1.x 자료와 현재 RealGrid2 기능을 같은 버전으로 취급하지 않습니다.
@@ -18,7 +22,7 @@
 
 행 추가·삭제·변경 상태·저장 기준 롤백, 고유값·조건 필터, 다중 정렬, 컬럼 너비·순서·고정 열, 그룹 헤더, 드롭다운·날짜 편집기, 행·전체 검증, 로컬 페이징과 기본 집계를 구현합니다. TypeScript 선언과 공개 API 계약을 정리합니다.
 
-XLSX는 선택 모듈로 추가합니다. [RealGrid 내보내기 문서](https://docs.realgrid.com/guides/excels/excel-export)는 JSZip을 요구하고, [가져오기 예제](https://docs.realgrid.com/guides/tip/excel-import)는 SheetJS를 사용합니다. 따라서 기능 유무와 외부 라이브러리 의존성을 구분합니다. Moa가 사용할 라이브러리·버전·라이선스는 아직 선정하지 않았습니다. 선정 시 배포 파일과 고지문을 로컬 동봉하며 CDN을 요구하지 않습니다.
+XLSX는 0.2.0에서 SheetJS Community Edition 0.20.3(Apache-2.0)을 로컬 동봉하는 선택 모듈로 추가했습니다. [RealGrid 내보내기 문서](https://docs.realgrid.com/guides/excels/excel-export)는 JSZip을 요구하고, [가져오기 예제](https://docs.realgrid.com/guides/tip/excel-import)는 SheetJS를 사용합니다. Moa는 동봉 파일과 라이선스·해시를 제공하고 런타임 CDN을 요구하지 않습니다. 정교한 엑셀 스타일·수식·보호는 후속 대상입니다.
 
 ## M2 · 고급 그리드
 

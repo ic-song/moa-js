@@ -90,6 +90,8 @@ test('unsafe or duplicate field names are rejected', () => {
 test('boolean conversion is explicit and rejects arbitrary text', () => {
   const model = new GridModel([{ field: 'enabled', type: 'boolean' }], [{ enabled: false }]);
   model.apply([{ row: 0, field: 'enabled', value: 'true' }]); assert.equal(model.rows[0].enabled, true);
+  model.apply([{ row: 0, field: 'enabled', value: ' FALSE ' }]); assert.equal(model.rows[0].enabled, false);
+  model.apply([{ row: 0, field: 'enabled', value: 'TRUE' }]); assert.equal(model.rows[0].enabled, true);
   assert.throws(() => model.apply([{ row: 0, field: 'enabled', value: 'yes' }]), /true/);
 });
 
@@ -100,5 +102,6 @@ test('Excel TSV roundtrip preserves tabs, multiline, quotes, empty trailing cell
   assert.deepEqual(parseTSV('a\t\r\n'), [['a', '']]);
   assert.deepEqual(parseTSV('\uFEFF가\t나'), [['가', '나']]);
   assert.deepEqual(parseTSV(''), [['']]);
+  assert.deepEqual(parseTSV('"첫줄\r\n둘째줄"\t끝\r\n'), [['첫줄\n둘째줄', '끝']]);
   assert.throws(() => parseTSV('"닫히지 않음'), /따옴표/);
 });

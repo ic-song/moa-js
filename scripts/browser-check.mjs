@@ -85,7 +85,7 @@ try {
   await page.evaluate(() => { grid.setData([{ code: 'X', name: '<img src=x onerror=alert(1)>', category: '', quantity: 1, price: 2, team: '', note: '' }]); });
   assert.equal(await page.locator('.moa-grid img').count(), 0); assert.match(await cell(0, 1).innerText(), /<img/);
   const beforeOverflow = await data();
-  await page.evaluate(() => grid.select({ row: 0, col: 6 }));
+  await page.evaluate(() => grid.select({ row: 0, col: grid.columns.length - 1 }));
   await page.evaluate(() => navigator.clipboard.writeText('a\tb')); await page.keyboard.press('Control+v');
   assert.deepEqual(await data(), beforeOverflow); assert.match(await page.locator('.moa-grid__status').innerText(), /범위/);
   record('HTML values render as text and out-of-bounds paste is fully rejected');

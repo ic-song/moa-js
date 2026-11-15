@@ -10,7 +10,7 @@ export function parseTSV(text) {
       else if (value === '') quoted = true;
       else value += char;
     } else if (!quoted && (char === '\t' || char === '\n' || char === '\r')) {
-      rows[rows.length - 1].push(value); value = '';
+      rows[rows.length - 1].push(value.replace(/\r\n?/g, '\n')); value = '';
       if (char !== '\t') {
         if (char === '\r' && text[i + 1] === '\n') i++;
         rows.push([]);
@@ -18,7 +18,7 @@ export function parseTSV(text) {
     } else value += char;
   }
   if (quoted) throw new Error('닫히지 않은 따옴표가 있습니다.');
-  rows[rows.length - 1].push(value);
+  rows[rows.length - 1].push(value.replace(/\r\n?/g, '\n'));
   if (rows.length > 1 && /(?:\r\n|\r|\n)$/.test(text)) rows.pop();
   return rows;
 }
@@ -46,6 +46,7 @@ export class GridModel {
 
   setData(rows) {
     if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== 'object' || Array.isArray(row))) throw new Error('data는 행 객체 배열이어야 합니다.');
+    this.validateRows?.(rows);
     this.rows = rows.map(row => ({ ...row }));
     this.past = []; this.future = [];
   }
@@ -60,9 +61,12 @@ export class GridModel {
       return column.type === 'number' || column.type === 'boolean' ? null : '';
     }
     if (column.type === 'number') {
-      if (typeof value === 'boolean' || !String(value).trim() || !Number.isFinite(Number(value))) throw new Error(`${column.header || column.field}: 숫자를 입력하세요.`);
-      value = Number(value);
+      let numeric = String(value).trim().replace(/\u2212/g, '-');
+      if (/^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(numeric)) numeric = numeric.replace(/,/g, '');
+      if (typeof value === 'boolean' || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(numeric) || !Number.isFinite(Number(numeric))) throw new Error(`${column.header || column.field}: 숫자를 입력하세요.`);
+      value = Number(numeric);
     } else if (column.type === 'boolean') {
+      if (typeof value === 'string') value = value.trim().toLowerCase();
       if ([true, 'true', '1', 1].includes(value)) value = true;
       else if ([false, 'false', '0', 0].includes(value)) value = false;
       else throw new Error(`${column.header || column.field}: true 또는 false를 입력하세요.`);
@@ -87,16 +91,54 @@ export class GridModel {
     }
     // Validate the entire transaction before changing any cell.
     if (!transaction.length) return [];
+    if (this.validateRows) {
+      const candidate = this.getData();
+      for (const change of transaction) candidate[change.row][change.field] = change.value;
+      this.validateRows(candidate);
+    }
     for (const change of transaction) this.rows[change.row][change.field] = change.value;
-    this.past.push({ changes: transaction, reason });
+    this.remember({ changes: transaction, reason });
+    return transaction.map(change => ({ ...change }));
+  }
+
+  remember(entry) {
+    this.past.push(entry);
     if (this.past.length > this.historyLimit) this.past.shift();
     this.future = [];
-    return transaction.map(change => ({ ...change }));
+  }
+
+  replaceRows(rows, reason = 'replace', validate = true) {
+    if (!this.editable) return [];
+    if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== 'object' || Array.isArray(row))) throw new Error('data는 행 객체 배열이어야 합니다.');
+    const next = rows.map(row => ({ ...row }));
+    if (validate) for (const row of next) for (const column of this.columns) row[column.field] = this.convert(column, row[column.field]);
+    this.validateRows?.(next);
+    const before = this.getData();
+    if (JSON.stringify(before) === JSON.stringify(next)) return [];
+    this.rows = next;
+    this.remember({ reason, before, after: this.getData() });
+    return [{ kind: 'rows', row: -1, field: null, previous: before.map(row => ({ ...row })), value: this.getData() }];
+  }
+
+  insertRows(index, rows) {
+    if (!Number.isInteger(index) || index < 0 || index > this.rows.length) throw new Error('행 삽입 위치가 올바르지 않습니다.');
+    const next = this.getData(); next.splice(index, 0, ...rows);
+    return this.replaceRows(next, 'insert', false);
+  }
+
+  removeRows(indices) {
+    if (indices.some(index => !Number.isInteger(index) || index < 0 || index >= this.rows.length)) throw new Error('행 삭제 위치가 올바르지 않습니다.');
+    const removed = new Set(indices);
+    return this.replaceRows(this.rows.filter((_, index) => !removed.has(index)), 'delete', false);
   }
 
   undo() {
     const entry = this.past.pop();
     if (!entry) return [];
+    if (entry.before) {
+      this.rows = entry.before.map(row => ({ ...row })); this.future.push(entry);
+      return [{ kind: 'rows', row: -1, field: null, previous: entry.after.map(row => ({ ...row })), value: this.getData() }];
+    }
     for (const change of entry.changes) this.rows[change.row][change.field] = change.previous;
     this.future.push(entry);
     return entry.changes.map(change => ({ ...change, value: change.previous, previous: change.value }));
@@ -105,6 +147,10 @@ export class GridModel {
   redo() {
     const entry = this.future.pop();
     if (!entry) return [];
+    if (entry.after) {
+      this.rows = entry.after.map(row => ({ ...row })); this.past.push(entry);
+      return [{ kind: 'rows', row: -1, field: null, previous: entry.before.map(row => ({ ...row })), value: this.getData() }];
+    }
     for (const change of entry.changes) this.rows[change.row][change.field] = change.value;
     this.past.push(entry);
     return entry.changes.map(change => ({ ...change }));
